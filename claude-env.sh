@@ -18,15 +18,23 @@ export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 # service.name -> Honeycomb dataset name for traces.
-export OTEL_SERVICE_NAME=claude-code
+# Commented out so we can see what Claude Code defaults service.name to.
+# export OTEL_SERVICE_NAME=claude-code
 
 # Custom resource attributes. Add anything you want to tag every span with.
 export OTEL_RESOURCE_ATTRIBUTES="source=claude-code"
 
 # ---- Detailed beta tracing (claude_code.hook spans + richer content attrs) ----
-# Requires your org to be allowlisted for interactive sessions; works
-# unconditionally for Agent SDK and `claude -p`. Points at the local collector
-# so the data flows through our transformations on its way to Honeycomb.
+# Per the docs: requires your org to be allowlisted for the feature in
+# *interactive* CLI sessions. Agent SDK and `claude -p` sessions are not gated.
+# If interactive runs don't produce claude_code.hook spans after enabling this,
+# allowlisting is the likely cause.
+# TODO: verify whether modernity is allowlisted -- update this comment once
+# we've checked.
+#
+# BETA_TRACING_ENDPOINT points at the local collector so detailed data flows
+# through our transforms. If Claude Code turns out to want a real Honeycomb
+# endpoint there, switch this to api.honeycomb.io:443.
 export ENABLE_BETA_TRACING_DETAILED=1
 export BETA_TRACING_ENDPOINT=http://localhost:4317
 
