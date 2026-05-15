@@ -1,0 +1,13 @@
+services:
+  collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: claude-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      HONEYCOMB_API_KEY: ${HONEYCOMB_API_KEY:?HONEYCOMB_API_KEY is required}
+      HONEYCOMB_API_ENDPOINT: ${HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}
