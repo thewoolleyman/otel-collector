@@ -13,9 +13,14 @@ processors:
   transform/agent_timeline:
     error_mode: ignore
     trace_statements:
-      # Universal: every span gets a conversation id and an agent name.
+      # Universal: every span gets a conversation id, an agent name, and a
+      # marker proving it passed through this collector. Bump the version
+      # whenever the config changes meaningfully so we can tell which
+      # transformed-spans came from which generation of the config.
       - context: span
         statements:
+          - set(attributes["collector.claude-collector"], "washere")
+          - set(attributes["collector.claude-collector.version"], "0.1")
           - set(attributes["gen_ai.conversation.id"], attributes["session.id"]) where IsString(attributes["session.id"])
           - set(attributes["gen_ai.agent.name"], "Claude Code")
 
