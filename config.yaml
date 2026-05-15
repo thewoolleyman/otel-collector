@@ -16,48 +16,47 @@ processors:
       # Universal: every span gets a conversation id and an agent name.
       - context: span
         statements:
-          - set(attributes["gen_ai.conversation.id"], attributes["session.id"]) where attributes["session.id"] != nil
+          - set(attributes["gen_ai.conversation.id"], attributes["session.id"]) where IsString(attributes["session.id"])
           - set(attributes["gen_ai.agent.name"], "Claude Code")
 
       # claude_code.interaction  ->  invoke_agent Claude Code
       - context: span
         conditions:
-          - name == "claude_code.interaction"
+          - 'span.name == "claude_code.interaction"'
         statements:
           - set(attributes["gen_ai.operation.name"], "invoke_agent")
-          - set(name, Concat(["invoke_agent ", attributes["gen_ai.agent.name"]], ""))
+          - set(span.name, Concat(["invoke_agent ", attributes["gen_ai.agent.name"]], ""))
 
       # claude_code.llm_request  ->  chat {model}
       - context: span
         conditions:
-          - name == "claude_code.llm_request"
+          - 'span.name == "claude_code.llm_request"'
         statements:
           - set(attributes["gen_ai.operation.name"], "chat")
-          - set(name, Concat(["chat ", attributes["model"]], "")) where attributes["model"] != nil
+          - set(span.name, Concat(["chat ", attributes["model"]], "")) where IsString(attributes["model"])
 
       # Task tool with a known subagent  ->  invoke_agent {subagent_type}
       # (subagent_type requires OTEL_LOG_TOOL_DETAILS=1 in Claude Code)
+      # Conditions joined with explicit `and` because this OTTL build appears
+      # to OR the entries in the conditions array.
       - context: span
         conditions:
-          - name == "claude_code.tool"
-          - attributes["tool_name"] == "Task"
-          - attributes["subagent_type"] != nil
+          - 'span.name == "claude_code.tool" and attributes["tool_name"] == "Task" and IsString(attributes["subagent_type"])'
         statements:
           - set(attributes["gen_ai.agent.name"], attributes["subagent_type"])
           - set(attributes["gen_ai.operation.name"], "invoke_agent")
-          - set(name, Concat(["invoke_agent ", attributes["subagent_type"]], ""))
+          - set(span.name, Concat(["invoke_agent ", attributes["subagent_type"]], ""))
 
       # All other claude_code.tool spans  ->  execute_tool {tool_name}
       # Duration here includes the permission-wait child; tool_name lives only on
       # the parent .tool span, so we use it instead of claude_code.tool.execution.
       - context: span
         conditions:
-          - name == "claude_code.tool"
-          - attributes["gen_ai.operation.name"] == nil
+          - 'span.name == "claude_code.tool" and attributes["gen_ai.operation.name"] == nil'
         statements:
           - set(attributes["gen_ai.operation.name"], "execute_tool")
-          - set(attributes["gen_ai.tool.name"], attributes["tool_name"]) where attributes["tool_name"] != nil
-          - set(name, Concat(["execute_tool ", attributes["tool_name"]], "")) where attributes["tool_name"] != nil
+          - set(attributes["gen_ai.tool.name"], attributes["tool_name"]) where IsString(attributes["tool_name"])
+          - set(span.name, Concat(["execute_tool ", attributes["tool_name"]], "")) where IsString(attributes["tool_name"])
 
 exporters:
   otlp/honeycomb:
