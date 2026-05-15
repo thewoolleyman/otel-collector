@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Start the claude-collector via docker compose.
+# Requires HONEYCOMB_API_KEY to be set in the environment.
+# Optional: HONEYCOMB_API_ENDPOINT (default api.honeycomb.io:443 for US ingest).
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+if [[ -z "${HONEYCOMB_API_KEY:-}" ]]; then
+  echo "error: HONEYCOMB_API_KEY is not set." >&2
+  echo "       export it (the key for the destination Honeycomb environment) and try again." >&2
+  exit 1
+fi
+
+echo "Starting collector..."
+echo "  OTLP gRPC: localhost:4317"
+echo "  OTLP HTTP: localhost:4318"
+echo "  Exporting to: ${HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}"
+echo
+
+exec docker compose up
