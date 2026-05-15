@@ -10,17 +10,35 @@ processors:
   batch:
     timeout: 5s
 
+  # Marker processor: stamps every signal (traces, metrics, logs) with proof
+  # that it passed through this collector. Filter on
+  # collector.claude-collector="washere" in Honeycomb to see only data that
+  # went through us. Bump the version whenever this config changes
+  # meaningfully so we can tell which generation produced which data.
+  transform/mark:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.claude-collector"], "washere")
+          - set(attributes["collector.claude-collector.version"], "0.2")
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.claude-collector"], "washere")
+          - set(attributes["collector.claude-collector.version"], "0.2")
+    log_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.claude-collector"], "washere")
+          - set(attributes["collector.claude-collector.version"], "0.2")
+
   transform/agent_timeline:
     error_mode: ignore
     trace_statements:
-      # Universal: every span gets a conversation id, an agent name, and a
-      # marker proving it passed through this collector. Bump the version
-      # whenever the config changes meaningfully so we can tell which
-      # transformed-spans came from which generation of the config.
+      # Universal: every span gets a conversation id and an agent name.
       - context: span
         statements:
-          - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.1")
           - set(attributes["gen_ai.conversation.id"], attributes["session.id"]) where IsString(attributes["session.id"])
           - set(attributes["gen_ai.agent.name"], "Claude Code")
 
@@ -76,13 +94,13 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [transform/agent_timeline, batch]
+      processors: [transform/mark, transform/agent_timeline, batch]
       exporters: [otlp/honeycomb]
     logs:
       receivers: [otlp]
-      processors: [batch]
+      processors: [transform/mark, batch]
       exporters: [otlp/honeycomb]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      processors: [transform/mark, batch]
       exporters: [otlp/honeycomb]
