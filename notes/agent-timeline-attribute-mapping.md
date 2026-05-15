@@ -37,26 +37,35 @@ Verified against trace `51e48a330e17ce8f7e19429d248256eb` in `claude-code-usage`
 - Already present (good): `session.id`, `gen_ai.system`, `gen_ai.request.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`, `model`, `input_tokens`, `total_tokens`, `tool_name`, `tool_use_id`, `agent_id`, `parent_agent_id`, `interaction.sequence`, `span.type`.
 - Missing for the timeline: `gen_ai.conversation.id`, `gen_ai.agent.name`, `gen_ai.operation.name`, and the renamed span names.
 
-## Proposed collector transformations
+## v1 collector transformations (see `config.yaml`)
 
 All applied as `transform` processor statements keyed on `span.name` (which the doc says always equals `span.type`).
-
-| Source | Set `gen_ai.operation.name` | Rewrite span name to |
-|---|---|---|
-| `claude_code.interaction` | `invoke_agent` | `invoke_agent {agent.name}` |
-| `claude_code.llm_request` | `chat` | `chat {model}` |
-| `claude_code.tool` | `execute_tool` | `execute_tool {tool_name}` |
-| `claude_code.tool.execution` | *(see open question)* | *(see open question)* |
-| `claude_code.tool.blocked_on_user` | leave as-is | leave as-is |
-| `claude_code.hook` | leave as-is | leave as-is |
 
 Unconditional on every span:
 
 - `gen_ai.conversation.id` ← `session.id`
-- `gen_ai.agent.name` ← `agent_id` if present, else `"Claude Code"` (or `service.name`).
+- `gen_ai.agent.name` ← `"Claude Code"` (default; overridden below for Task sub-agents)
 
-## Open questions
+Per span type:
 
-1. **`claude_code.tool` vs `claude_code.tool.execution`.** The parent `claude_code.tool` span represents the whole tool call (including the wait-for-permission child). Honeycomb expects one `execute_tool` span per tool call. We probably want the parent to be the timeline node and leave `.execution` and `.blocked_on_user` as nested detail. Decide once we see how the timeline renders both options.
-2. **Sub-agent naming.** Claude Code sets `agent_id` on LLM-request spans but I haven't confirmed whether the `claude_code.interaction` span itself carries `agent_id` for sub-agent interactions, or just for nested LLM/tool spans. Need to verify against a Task-tool trace before deciding the agent-name expression.
-3. **`gen_ai.tool.name`.** Worth also copying `tool_name` → `gen_ai.tool.name` for the recommended-attrs path.
+| Source                                       | Set `gen_ai.operation.name` | Rewrite span name to            | Notes                                                                 |
+|----------------------------------------------|-----------------------------|---------------------------------|-----------------------------------------------------------------------|
+| `claude_code.interaction`                    | `invoke_agent`              | `invoke_agent Claude Code`      |                                                                       |
+| `claude_code.llm_request`                    | `chat`                      | `chat {model}`                  |                                                                       |
+| `claude_code.tool` (Task, `subagent_type` set) | `invoke_agent`            | `invoke_agent {subagent_type}`  | Also sets `gen_ai.agent.name = subagent_type`. Needs `OTEL_LOG_TOOL_DETAILS=1`. |
+| `claude_code.tool` (other)                   | `execute_tool`              | `execute_tool {tool_name}`      | Also copies `tool_name` → `gen_ai.tool.name`.                         |
+| `claude_code.tool.execution`                 | *(left as-is)*              | *(left as-is)*                  | Sits inside the timeline node above as nested detail.                 |
+| `claude_code.tool.blocked_on_user`           | *(left as-is)*              | *(left as-is)*                  |                                                                       |
+| `claude_code.hook`                           | *(left as-is)*              | *(left as-is)*                  |                                                                       |
+
+## Known v1 limitations
+
+1. **Tool duration includes permission wait.** We use the parent `claude_code.tool` because `tool_name` lives there and not on `claude_code.tool.execution`. That makes the timeline bar wider than the actual execution. Fix would need cross-span attribute propagation.
+2. **Sub-agent's own spans are labeled "Claude Code".** Task spawns a sub-agent whose `claude_code.llm_request` / `claude_code.tool` spans nest under the parent's `claude_code.tool` span. They carry `agent_id` (UUID) but not the friendly `subagent_type`. Same propagation problem.
+3. **Sub-agent attribution requires `OTEL_LOG_TOOL_DETAILS=1`.** Without it, `subagent_type` is absent and Task calls show as `execute_tool Task`.
+
+## Possible v2 directions
+
+- **OTTL `cache` + `groupbytrace`**: stash parent attributes by `span_id` and look them up by `parent_span_id` on children. Untested, possibly fragile.
+- **Custom Go processor**: small contrib that does parent-attribute propagation for a configured list of attrs.
+- **File feedback to the Claude Code team** about the attribute placement (tool_name on .execution, subagent_type and skill_name un-gated and on subagent spans).

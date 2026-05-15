@@ -12,12 +12,20 @@ Claude Code can emit OTel telemetry: metrics, log/event records, and (in beta) t
 
 ## Running the collector
 
-*(Coming soon — config files live alongside this README.)*
+```bash
+export HONEYCOMB_API_KEY=<your key for the destination environment>
+# US ingest is the default; set to api.eu1.honeycomb.io:443 if you're on EU.
+# export HONEYCOMB_API_ENDPOINT=api.honeycomb.io:443
+
+docker compose up
+```
 
 The collector listens on the standard OTLP ports:
 
 - gRPC: `localhost:4317`
 - HTTP: `localhost:4318`
+
+If you'd rather run the binary directly, install [`otelcol-contrib`](https://github.com/open-telemetry/opentelemetry-collector-releases) (the `transform` processor is in contrib, not core) and run `otelcol-contrib --config config.yaml` with the same env vars set.
 
 ## Pointing Claude Code at the collector
 
@@ -54,6 +62,8 @@ export OTEL_LOG_TOOL_DETAILS=1
 export OTEL_LOG_TOOL_CONTENT=1
 ```
 
+`OTEL_LOG_TOOL_DETAILS=1` is also what makes `subagent_type` available on Task-tool spans, which is what the collector uses to label sub-agent invocations in the timeline.
+
 ### What you'll see
 
 Each user turn produces a `claude_code.interaction` root span with these children:
@@ -69,6 +79,22 @@ claude_code.interaction
 
 LLM-request spans already carry the OTel GenAI conventions (`gen_ai.system=anthropic`, `gen_ai.request.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons`), which is what Honeycomb's Agentic Timeline keys off of.
 
-## Status
+## How the timeline mapping works
 
-Just getting started. See `notes/` for working notes as we figure out the right attribute mapping.
+The collector applies these transforms to traces (see `config.yaml`):
+
+| Source span                | Becomes                       | `gen_ai.operation.name` |
+| -------------------------- | ----------------------------- | ----------------------- |
+| `claude_code.interaction`  | `invoke_agent Claude Code`    | `invoke_agent`          |
+| `claude_code.llm_request`  | `chat {model}`                | `chat`                  |
+| `claude_code.tool` (Task w/ subagent) | `invoke_agent {subagent_type}` | `invoke_agent`   |
+| `claude_code.tool` (other) | `execute_tool {tool_name}`    | `execute_tool`          |
+
+Every span also gets `gen_ai.conversation.id` (copied from `session.id`) and `gen_ai.agent.name` (defaults to `"Claude Code"`, overridden to `subagent_type` for Task-tool invocations).
+
+### Known limitations
+
+- The timeline span for a tool call is the parent `claude_code.tool`, whose duration includes the time spent waiting for permission. The more accurate `claude_code.tool.execution` child doesn't carry `tool_name`, so we can't easily synthesize `execute_tool {tool_name}` on it without cross-span propagation.
+- A sub-agent's own nested spans (the `claude_code.llm_request` / `claude_code.tool` spans inside a Task call) inherit the default `gen_ai.agent.name = "Claude Code"` instead of the sub-agent's name, for the same reason.
+
+See `notes/` for the full mapping rationale and a list of open questions.
