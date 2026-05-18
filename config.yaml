@@ -21,17 +21,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.2")
+          - set(attributes["collector.claude-collector.version"], "0.3")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.2")
+          - set(attributes["collector.claude-collector.version"], "0.3")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.2")
+          - set(attributes["collector.claude-collector.version"], "0.3")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -51,12 +51,31 @@ processors:
           - set(span.name, Concat(["invoke_agent ", attributes["gen_ai.agent.name"]], ""))
 
       # claude_code.llm_request  ->  chat {model}
+      # Also alias the bare-namespace token counts onto the GenAI semconv so the
+      # Agent Timeline tokens view picks them up. Claude Code's Detailed Beta puts
+      # some tokens under gen_ai.* and some under bare keys; this fills the gap.
       - context: span
         conditions:
           - 'span.name == "claude_code.llm_request"'
         statements:
           - set(attributes["gen_ai.operation.name"], "chat")
           - set(span.name, Concat(["chat ", attributes["model"]], "")) where IsString(attributes["model"])
+          - set(attributes["gen_ai.usage.input_tokens"], attributes["input_tokens"]) where IsInt(attributes["input_tokens"])
+          - set(attributes["gen_ai.usage.output_tokens"], attributes["output_tokens"]) where IsInt(attributes["output_tokens"])
+          - set(attributes["gen_ai.usage.cache_read_input_tokens"], attributes["cache_read_tokens"]) where IsInt(attributes["cache_read_tokens"])
+          - set(attributes["gen_ai.usage.cache_creation_input_tokens"], attributes["cache_creation_tokens"]) where IsInt(attributes["cache_creation_tokens"])
+
+      # claude_code.tool: alias tool input/result onto gen_ai.tool.call.* so the
+      # AI Conversations viewer renders the tool detail panes. Requires
+      # OTEL_LOG_TOOL_DETAILS=1 + OTEL_LOG_TOOL_CONTENT=1 in Claude Code. Done
+      # before the rename blocks below so we match on the original span name and
+      # cover both the execute_tool and Task->subagent paths.
+      - context: span
+        conditions:
+          - 'span.name == "claude_code.tool"'
+        statements:
+          - set(attributes["gen_ai.tool.call.arguments"], attributes["tool_input"]) where IsString(attributes["tool_input"])
+          - set(attributes["gen_ai.tool.call.result"], attributes["new_context"]) where IsString(attributes["new_context"])
 
       # Task tool with a known subagent  ->  invoke_agent {subagent_type}
       # (subagent_type requires OTEL_LOG_TOOL_DETAILS=1 in Claude Code)

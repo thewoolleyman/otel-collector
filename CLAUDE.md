@@ -106,6 +106,11 @@ The version column tells you which config generation produced each span.
 
 Plus, universally: `gen_ai.conversation.id` ← `session.id`, and `gen_ai.agent.name = "Claude Code"` (overridden to `subagent_type` for the Task-subagent rule).
 
+Attribute aliases (no rename, just enrichment onto the GenAI semconv):
+
+* On `claude_code.llm_request`: `input_tokens` / `output_tokens` / `cache_read_tokens` / `cache_creation_tokens` → `gen_ai.usage.{input,output,cache_read_input,cache_creation_input}_tokens`.
+* On `claude_code.tool` (applied before the rename, so covers both `execute_tool` and `invoke_agent {subagent_type}` paths): `tool_input` → `gen_ai.tool.call.arguments`, `new_context` → `gen_ai.tool.call.result`. Requires `OTEL_LOG_TOOL_DETAILS=1` + `OTEL_LOG_TOOL_CONTENT=1`.
+
 Full rationale and open questions: `notes/agent-timeline-attribute-mapping.md`.
 
 ## Known limitations / open questions

@@ -58,6 +58,26 @@ Per span type:
 | `claude_code.tool.blocked_on_user`           | *(left as-is)*              | *(left as-is)*                  |                                                                       |
 | `claude_code.hook`                           | *(left as-is)*              | *(left as-is)*                  |                                                                       |
 
+### Attribute aliases (no span rename, but enrich existing spans)
+
+On `claude_code.llm_request` (the future `chat {model}` span):
+
+| Source attribute | Aliased onto |
+|---|---|
+| `input_tokens` | `gen_ai.usage.input_tokens` |
+| `output_tokens` | `gen_ai.usage.output_tokens` |
+| `cache_read_tokens` | `gen_ai.usage.cache_read_input_tokens` |
+| `cache_creation_tokens` | `gen_ai.usage.cache_creation_input_tokens` |
+
+On `claude_code.tool` (covers both the `execute_tool` and `invoke_agent {subagent_type}` rewrites — applied before the rename):
+
+| Source attribute | Aliased onto | Requires |
+|---|---|---|
+| `tool_input` | `gen_ai.tool.call.arguments` | `OTEL_LOG_TOOL_DETAILS=1` + `OTEL_LOG_TOOL_CONTENT=1` |
+| `new_context` | `gen_ai.tool.call.result` | same |
+
+`gen_ai.tool.call.id` has no upstream equivalent in Detailed Beta — left absent. Aggregate `gen_ai.usage.*` on the parent `invoke_agent` span is also absent (per-call totals live on the `chat` children only); consumers compose at query time.
+
 ## Known v1 limitations
 
 1. **Tool duration includes permission wait.** We use the parent `claude_code.tool` because `tool_name` lives there and not on `claude_code.tool.execution`. That makes the timeline bar wider than the actual execution. Fix would need cross-span attribute propagation.
