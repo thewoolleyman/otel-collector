@@ -1,10 +1,15 @@
 receivers:
   otlp:
     protocols:
+      # Loopback-only on this host (vps): it has a routable public IP and no
+      # ufw, so binding 0.0.0.0 would expose the OTLP receiver to the public
+      # internet. Claude Code connects from localhost over gRPC (4317).
+      # The HTTP (4318) receiver is intentionally omitted: Claude Code doesn't
+      # need it here, and 4318 is reserved on this host for the future
+      # app-telemetry "E1" receiver (reached from docker sandboxes via the
+      # bridge gateway 172.17.0.1:4318). Keeping us off 4318 avoids a clash.
       grpc:
-        endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
+        endpoint: 127.0.0.1:4317
 
 processors:
   batch:
@@ -21,17 +26,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.3")
+          - set(attributes["collector.claude-collector.version"], "0.4")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.3")
+          - set(attributes["collector.claude-collector.version"], "0.4")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.3")
+          - set(attributes["collector.claude-collector.version"], "0.4")
 
   transform/agent_timeline:
     error_mode: ignore
