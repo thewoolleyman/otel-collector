@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LABEL="com.thewoolleyweb.claude-collector"
+LABEL="com.thewoolleyweb.otel-collector"
 TARGET="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 

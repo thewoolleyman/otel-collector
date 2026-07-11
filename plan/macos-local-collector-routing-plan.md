@@ -1,5 +1,14 @@
 # macOS Local Collector Routing Plan
 
+> **Note (2026-07-11):** the repo/collector was renamed `claude-collector`
+> → `otel-collector`, and the macOS launchd label
+> `com.thewoolleyweb.claude-collector` →
+> `com.thewoolleyweb.otel-collector`. This document is the ORIGINAL setup
+> record and its `claude-collector` references are kept as historical
+> context. To migrate an existing Mac install to the new name, follow
+> [`rename-to-otel-collector-macos-migration.md`](rename-to-otel-collector-macos-migration.md)
+> instead.
+
 You are operating in `/Users/cwoolley/workspace/claude-collector`, a local clone
 of `git@github.com:thewoolleyman/claude-collector.git`.
 
