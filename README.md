@@ -1,6 +1,8 @@
-# claude-collector
+# otel-collector
 
-An OpenTelemetry Collector configuration for receiving telemetry from [Claude Code](https://code.claude.com/docs/en/monitoring-usage) and forwarding it to [Honeycomb](https://www.honeycomb.io), shaped so it appears in Honeycomb's **Agentic Timeline**.
+This host's OpenTelemetry Collector — it receives telemetry, shapes it, and forwards it to [Honeycomb](https://www.honeycomb.io). Today its main job is shaping [Claude Code](https://code.claude.com/docs/en/monitoring-usage) telemetry so it appears in Honeycomb's **Agentic Timeline**; the same collector also carries the host's metrics/logs pipelines and can grow additional shapers (e.g. for other agent runtimes). It runs on **Linux or macOS**.
+
+> Formerly named `claude-collector`. The name was generalized because this is functionally the host's shared OTel collector, of which the Claude-Code Agentic-Timeline shaping is just one processor.
 
 ## What it does
 
@@ -12,20 +14,29 @@ Claude Code can emit OTel telemetry: metrics, log/event records, and (in beta) t
 
 ## Running the collector
 
+Runs the same way on **Linux or macOS** — the only requirement is Docker (Docker Engine on Linux, Docker Desktop on macOS).
+
 ```bash
 export HONEYCOMB_API_KEY=<your key for the destination environment>
 # US ingest is the default; set to api.eu1.honeycomb.io:443 if you're on EU.
 # export HONEYCOMB_API_ENDPOINT=api.honeycomb.io:443
 
-docker compose up
+./run                      # foreground; sources .env if present
+# or: docker compose up -d # detached / background
 ```
 
-The collector listens on the standard OTLP ports:
+The collector listens on the standard OTLP gRPC port, **loopback only**:
 
 - gRPC: `localhost:4317`
-- HTTP: `localhost:4318`
+
+(The HTTP `:4318` receiver is intentionally omitted — see the comment in `config.yaml`. Add an `http:` block there if you need it.)
 
 If you'd rather run the binary directly, install [`otelcol-contrib`](https://github.com/open-telemetry/opentelemetry-collector-releases) (the `transform` processor is in contrib, not core) and run `otelcol-contrib --config config.yaml` with the same env vars set.
+
+### Running it as a background service
+
+- **Linux:** a `systemd` unit works well — `Type=simple`, `User=<you>`, `EnvironmentFile=<path>/.env`, `ExecStart=/usr/local/bin/otelcol-contrib --config=<path>/config.yaml`. This host runs it exactly that way.
+- **macOS:** use `docker compose up -d` (Docker Desktop can start it at login), or a `launchd` LaunchAgent running the same `otelcol-contrib` command.
 
 ## Pointing Claude Code at the collector
 
