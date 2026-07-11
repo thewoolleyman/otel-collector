@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-LABEL="com.thewoolleyweb.claude-collector"
+LABEL="com.thewoolleyweb.otel-collector"
 
 if [[ ! -f "$REPO_ROOT/.env.local" ]]; then
   echo "Missing $REPO_ROOT/.env.local" >&2

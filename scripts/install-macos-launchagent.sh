@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-LABEL="com.thewoolleyweb.claude-collector"
+LABEL="com.thewoolleyweb.otel-collector"
 SOURCE="$REPO_ROOT/launchd/$LABEL.plist.example"
 TARGET="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"

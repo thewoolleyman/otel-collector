@@ -1,3 +1,5 @@
+> **⚠️ macOS: PENDING RENAME MIGRATION — run it FIRST.** See [`AGENTS.md`](AGENTS.md) and [`plan/rename-to-otel-collector-macos-migration.md`](plan/rename-to-otel-collector-macos-migration.md). Delete this line (and the `AGENTS.md` reminder) once the Mac migration is done + smoke-tested.
+
 # otel-collector — notes for future-Claude
 
 > Formerly `claude-collector`. Renamed because this is functionally the
