@@ -1,13 +1,14 @@
 services:
   collector:
     image: otel/opentelemetry-collector-contrib:latest
-    container_name: claude-collector
+    container_name: otel-collector
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./config.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
+      # gRPC only — config.yaml listens on 4317. Add "4318:4318" here if you
+      # add an http: receiver block to config.yaml.
       - "4317:4317"
-      - "4318:4318"
     environment:
       HONEYCOMB_API_KEY: ${HONEYCOMB_API_KEY:?HONEYCOMB_API_KEY is required}
       HONEYCOMB_API_ENDPOINT: ${HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}

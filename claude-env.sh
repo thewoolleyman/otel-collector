@@ -1,5 +1,5 @@
 # Source this before running `claude` to send its telemetry to the local
-# claude-collector (which forwards to Honeycomb).
+# otel-collector (which forwards to Honeycomb).
 #
 #   source claude-env.sh
 #   claude

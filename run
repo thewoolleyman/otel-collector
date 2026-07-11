@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Start the claude-collector via docker compose.
+# Start the otel-collector via docker compose. Works on Linux or macOS
+# (Docker Engine / Docker Desktop). Use `docker compose up -d` to detach.
 # Requires HONEYCOMB_API_KEY to be set in the environment.
 # Optional: HONEYCOMB_API_ENDPOINT (default api.honeycomb.io:443 for US ingest).
 
@@ -22,7 +23,6 @@ fi
 
 echo "Starting collector..."
 echo "  OTLP gRPC: localhost:4317"
-echo "  OTLP HTTP: localhost:4318"
 echo "  Exporting to: ${HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}"
 echo
 

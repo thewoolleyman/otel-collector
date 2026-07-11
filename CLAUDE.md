@@ -1,4 +1,12 @@
-# claude-collector — notes for future-Claude
+# otel-collector — notes for future-Claude
+
+> Formerly `claude-collector`. Renamed because this is functionally the
+> host's shared OTel collector (all three signal pipelines); the Claude
+> Code Agentic-Timeline shaping is one processor of it. Runs on Linux or
+> macOS. On this host it runs as a **systemd** service
+> (`otel-collector.service`) invoking the `otelcol-contrib` binary
+> directly — NOT via `docker compose` (the `./run` / compose path is the
+> portable dev path and works on either OS).
 
 ## What this project does
 
@@ -37,14 +45,14 @@ The collector listens on `localhost:4317` (gRPC) and `localhost:4318` (HTTP) and
 Claude Code  --OTLP-->  collector (transform/mark → transform/agent_timeline → batch)  --OTLP-->  Honeycomb
 ```
 
-* `transform/mark` runs in **all three pipelines** (traces, metrics, logs) and stamps `collector.claude-collector="washere"` and `collector.claude-collector.version="<n>"` on the resource so we can prove data passed through us.
+* `transform/mark` runs in **all three pipelines** (traces, metrics, logs) and stamps `collector.otel-collector="washere"` and `collector.otel-collector.version="<n>"` on the resource so we can prove data passed through us.
 * `transform/agent_timeline` runs **only on traces**. It does the Agent-Timeline-shaped rewrites of span name and `gen_ai.*` attributes.
 
 ## Conventions to keep
 
 ### Bump the version on every config change
 
-The `collector.claude-collector.version` attribute lives in `transform/mark` for all three signal types. **Bump it every time you change `config.yaml`** (even trivially). It's how we tell which generation of the config produced which data in Honeycomb. Current value lives at three spots in `config.yaml` — search for `claude-collector.version` and update all three.
+The `collector.otel-collector.version` attribute lives in `transform/mark` for all three signal types. **Bump it every time you change `config.yaml`** (even trivially). It's how we tell which generation of the config produced which data in Honeycomb. Current value lives at three spots in `config.yaml` — search for `otel-collector.version` and update all three.
 
 ### Commit after each conceptual change, tagged "- claude"
 
@@ -78,15 +86,15 @@ The defensive `where` on the `set(...)` is belt-and-suspenders against the same 
 
 After editing `config.yaml`:
 
-1. Bump `collector.claude-collector.version` in all three places (`transform/mark`).
-2. `docker compose restart`.
+1. Bump `collector.otel-collector.version` in all three places (`transform/mark`).
+2. Restart the collector so it reloads `config.yaml`: `sudo systemctl restart otel-collector` on this host (systemd), or `docker compose restart` if you run it via compose.
 3. Have jessitron run something in her claude session, then query Honeycomb:
 
 ```
 dataset: claude-code (in env claude-code-usage)
-breakdowns: name, gen_ai.operation.name, gen_ai.agent.name, collector.claude-collector.version
+breakdowns: name, gen_ai.operation.name, gen_ai.agent.name, collector.otel-collector.version
 time_range: 3m
-filter: collector.claude-collector = "washere"
+filter: collector.otel-collector = "washere"
 ```
 
 The version column tells you which config generation produced each span.

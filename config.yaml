@@ -1,13 +1,17 @@
 receivers:
   otlp:
     protocols:
-      # Loopback-only on this host (vps): it has a routable public IP and no
-      # ufw, so binding 0.0.0.0 would expose the OTLP receiver to the public
-      # internet. Claude Code connects from localhost over gRPC (4317).
-      # The HTTP (4318) receiver is intentionally omitted: Claude Code doesn't
-      # need it here, and 4318 is reserved on this host for the future
-      # app-telemetry "E1" receiver (reached from docker sandboxes via the
-      # bridge gateway 172.17.0.1:4318). Keeping us off 4318 avoids a clash.
+      # Loopback-only bind (127.0.0.1) — the collector is never exposed off
+      # the host, on Linux or macOS alike. On a server with a routable public
+      # IP (this host is a Linux VPS with no firewall) binding 0.0.0.0 would
+      # expose the OTLP receiver to the internet; on a laptop loopback is
+      # simply the right default. Claude Code connects from localhost over
+      # gRPC (4317).
+      # The HTTP (4318) receiver is intentionally omitted: Claude Code uses
+      # gRPC here, and on THIS host 4318 is reserved for a separate
+      # app-telemetry receiver (reached from docker sandboxes via the bridge
+      # gateway 172.17.0.1:4318). On a host without that constraint you may
+      # add an http: block under protocols if you need it.
       grpc:
         endpoint: 127.0.0.1:4317
 
@@ -17,7 +21,7 @@ processors:
 
   # Marker processor: stamps every signal (traces, metrics, logs) with proof
   # that it passed through this collector. Filter on
-  # collector.claude-collector="washere" in Honeycomb to see only data that
+  # collector.otel-collector="washere" in Honeycomb to see only data that
   # went through us. Bump the version whenever this config changes
   # meaningfully so we can tell which generation produced which data.
   transform/mark:
@@ -25,18 +29,18 @@ processors:
     trace_statements:
       - context: resource
         statements:
-          - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.4")
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "0.5")
     metric_statements:
       - context: resource
         statements:
-          - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.4")
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "0.5")
     log_statements:
       - context: resource
         statements:
-          - set(attributes["collector.claude-collector"], "washere")
-          - set(attributes["collector.claude-collector.version"], "0.4")
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "0.5")
 
   transform/agent_timeline:
     error_mode: ignore
