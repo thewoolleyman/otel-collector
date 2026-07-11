@@ -15,6 +15,62 @@ receivers:
       grpc:
         endpoint: 127.0.0.1:4317
 
+  # Host resource metrics (Phase P-host of the fabro-ci-image-factoring plan).
+  # Scrapers are scoped deliberately: there is NO `process` scraper — it would
+  # blow up per-PID cardinality and needs root to see other users' processes.
+  # Per-container attribution comes from docker_stats below instead. These
+  # scrapers read world-readable /proc and /sys, so the non-root `ubuntu`
+  # service user can collect them.
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      load:
+      memory:
+      paging:
+      disk:
+      filesystem:
+        # Keep to real disks: exclude pseudo-filesystems and the many docker
+        # overlay mounts, which would otherwise explode mount-point cardinality.
+        exclude_mount_points:
+          mount_points:
+            - /proc/*
+            - /sys/*
+            - /run/*
+            - /dev/*
+            - /var/lib/docker/*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - pstore
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tmpfs
+            - tracefs
+          match_type: strict
+
+  # Per-container resource attribution (Fabro sandbox vs CI runner vs Dolt).
+  # Reaches the Docker API over the socket; the `ubuntu` service user is in the
+  # `docker` group, so no extra grant is needed. Read-only stats.
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 30s
+
 processors:
   batch:
     timeout: 5s
@@ -30,17 +86,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.5")
+          - set(attributes["collector.otel-collector.version"], "0.6")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.5")
+          - set(attributes["collector.otel-collector.version"], "0.6")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.5")
+          - set(attributes["collector.otel-collector.version"], "0.6")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -115,6 +171,19 @@ exporters:
     headers:
       x-honeycomb-team: ${env:HONEYCOMB_API_KEY}
 
+  # Host/container metrics land in their own named dataset via an explicit
+  # x-honeycomb-dataset header. WITHOUT this header Honeycomb auto-routes
+  # metrics to a dataset it chooses (see CLAUDE.md "Metrics auto-route in
+  # Honeycomb"). Reuses the same key/env as otlp/honeycomb (the agent-activity
+  # env), so host-infra metrics sit alongside the factory dispatcher/sandbox
+  # trace spans they're correlated with. Phase P-host of
+  # fabro-ci-image-factoring.
+  otlp/honeycomb_hostmetrics:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_API_KEY}
+      x-honeycomb-dataset: livespec-host-metrics
+
   debug:
     verbosity: normal
 
@@ -132,3 +201,10 @@ service:
       receivers: [otlp]
       processors: [transform/mark, batch]
       exporters: [otlp/honeycomb]
+    # Host + per-container resource metrics on their own pipeline so they route
+    # to the named livespec-host-metrics dataset (via otlp/honeycomb_hostmetrics)
+    # while OTLP-received app metrics keep their existing auto-routing above.
+    metrics/host:
+      receivers: [hostmetrics, docker_stats]
+      processors: [transform/mark, batch]
+      exporters: [otlp/honeycomb_hostmetrics]
