@@ -93,17 +93,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.7")
+          - set(attributes["collector.otel-collector.version"], "0.8")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.7")
+          - set(attributes["collector.otel-collector.version"], "0.8")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.7")
+          - set(attributes["collector.otel-collector.version"], "0.8")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -172,6 +172,23 @@ processors:
           - set(attributes["gen_ai.tool.name"], attributes["tool_name"]) where IsString(attributes["tool_name"])
           - set(span.name, Concat(["execute_tool ", attributes["tool_name"]], "")) where IsString(attributes["tool_name"])
 
+  # Split the single otlp trace stream by service.name so the livespec bd-guard
+  # spans (service.name=bd-guard, emitted by the host `bd` wrapper) route to the
+  # livespec Honeycomb env while everything else keeps going to agent-activity.
+  # A span is DROPPED where its condition is true: `exclude_bd_guard` keeps
+  # bd-guard OUT of the agent-activity pipeline; `only_bd_guard` keeps ONLY
+  # bd-guard for the livespec pipeline.
+  filter/exclude_bd_guard:
+    error_mode: ignore
+    traces:
+      span:
+        - 'resource.attributes["service.name"] == "bd-guard"'
+  filter/only_bd_guard:
+    error_mode: ignore
+    traces:
+      span:
+        - 'resource.attributes["service.name"] != "bd-guard"'
+
 exporters:
   otlp/honeycomb:
     endpoint: ${env:HONEYCOMB_API_ENDPOINT}
@@ -191,6 +208,15 @@ exporters:
       x-honeycomb-team: ${env:HONEYCOMB_API_KEY}
       x-honeycomb-dataset: livespec-host-metrics
 
+  # bd-guard spans -> the livespec env (its own ingest key), landing in a
+  # `bd-guard` dataset alongside livespec-dispatcher/fabro-sandbox, NOT the
+  # agent-activity env the other pipelines use. Key from the collector .env
+  # (HONEYCOMB_INGEST_KEY_LIVESPEC); same OTLP endpoint.
+  otlp/honeycomb_livespec:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
+
   debug:
     verbosity: normal
 
@@ -198,8 +224,14 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [transform/mark, transform/agent_timeline, batch]
+      processors: [transform/mark, transform/agent_timeline, filter/exclude_bd_guard, batch]
       exporters: [otlp/honeycomb]
+    # bd-guard spans only -> livespec env. agent_timeline shaping is
+    # claude_code-specific, so it is intentionally NOT in this pipeline.
+    traces/bd_guard:
+      receivers: [otlp]
+      processors: [transform/mark, filter/only_bd_guard, batch]
+      exporters: [otlp/honeycomb_livespec]
     logs:
       receivers: [otlp]
       processors: [transform/mark, batch]
