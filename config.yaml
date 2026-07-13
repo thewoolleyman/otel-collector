@@ -14,6 +14,13 @@ receivers:
       # add an http: block under protocols if you need it.
       grpc:
         endpoint: 127.0.0.1:4317
+      # HTTP receiver on a spare loopback port (4319) so shell/curl callers
+      # — notably the livespec bd-guard wrapper — can emit OTLP/HTTP spans
+      # (curl cannot speak gRPC). 4318 stays reserved for the dispatcher's
+      # sandbox-telemetry receiver on the docker bridge; this is host-loopback
+      # only, same non-exposed posture as the gRPC bind above.
+      http:
+        endpoint: 127.0.0.1:4319
 
   # Host resource metrics (Phase P-host of the fabro-ci-image-factoring plan).
   # Scrapers are scoped deliberately: there is NO `process` scraper — it would
@@ -86,17 +93,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.6")
+          - set(attributes["collector.otel-collector.version"], "0.7")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.6")
+          - set(attributes["collector.otel-collector.version"], "0.7")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.6")
+          - set(attributes["collector.otel-collector.version"], "0.7")
 
   transform/agent_timeline:
     error_mode: ignore
