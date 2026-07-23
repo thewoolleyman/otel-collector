@@ -31,9 +31,22 @@ receivers:
   hostmetrics:
     collection_interval: 30s
     scrapers:
+      # system.cpu.utilization is opt-in (default emits only the cumulative
+      # system.cpu.time counter, which Honeycomb metrics datasets cannot
+      # RATE over) — the livespec-3lev.1 CPU-saturation trigger needs the
+      # per-interval utilization gauge (filter state=idle).
       cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
       load:
+      # system.linux.memory.available is opt-in; the RAM-available hard-floor
+      # trigger reads it (kernel "available" ≠ free — free undercounts by
+      # reclaimable cache, which misread the 2026-07-18 incident).
       memory:
+        metrics:
+          system.linux.memory.available:
+            enabled: true
       paging:
       disk:
       filesystem:
@@ -93,17 +106,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.8")
+          - set(attributes["collector.otel-collector.version"], "0.9")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.8")
+          - set(attributes["collector.otel-collector.version"], "0.9")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.8")
+          - set(attributes["collector.otel-collector.version"], "0.9")
 
   transform/agent_timeline:
     error_mode: ignore
