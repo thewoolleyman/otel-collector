@@ -106,17 +106,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.9")
+          - set(attributes["collector.otel-collector.version"], "0.10")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.9")
+          - set(attributes["collector.otel-collector.version"], "0.10")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.9")
+          - set(attributes["collector.otel-collector.version"], "0.10")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -202,6 +202,23 @@ processors:
       span:
         - 'resource.attributes["service.name"] != "bd-guard"'
 
+  # The CI-runner liveness heartbeat (livespec-dev-tooling
+  # ci-runner/observability/) posts one gauge to the loopback OTLP receiver;
+  # these two filters steer it INTO the pinned livespec-host-metrics dataset
+  # (metrics/ci_liveness pipeline) and OUT of the auto-routed app-metrics
+  # pipeline, so the 3lev.1 fleet-liveness trigger lives beside the other
+  # host-resource metrics it alerts with.
+  filter/exclude_ci_liveness:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name == "livespec.ci_runners.active"'
+  filter/only_ci_liveness:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'name != "livespec.ci_runners.active"'
+
 exporters:
   otlp/honeycomb:
     endpoint: ${env:HONEYCOMB_API_ENDPOINT}
@@ -251,8 +268,14 @@ service:
       exporters: [otlp/honeycomb]
     metrics:
       receivers: [otlp]
-      processors: [transform/mark, batch]
+      processors: [transform/mark, filter/exclude_ci_liveness, batch]
       exporters: [otlp/honeycomb]
+    # CI-runner liveness gauge only -> the pinned livespec-host-metrics
+    # dataset, beside the hostmetrics it alerts with (3lev.1).
+    metrics/ci_liveness:
+      receivers: [otlp]
+      processors: [transform/mark, filter/only_ci_liveness, batch]
+      exporters: [otlp/honeycomb_hostmetrics]
     # Host + per-container resource metrics on their own pipeline so they route
     # to the named livespec-host-metrics dataset (via otlp/honeycomb_hostmetrics)
     # while OTLP-received app metrics keep their existing auto-routing above.
