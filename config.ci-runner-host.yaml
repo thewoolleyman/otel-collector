@@ -1,0 +1,191 @@
+# config.ci-runner-host.yaml — the collector for a self-hosted CI RUNNER host
+# (today: poweredge-xubuntu, the k3s + Actions Runner Controller + Kueue node
+# that carries every livespec fleet repository's gating CI).
+#
+# This is the SECOND deployment shape of this repo, beside config.yaml (the
+# factory/VPS host, agent-activity env) and config.macos.yaml (laptops). It
+# exists because the CI-runner kit in livespec-dev-tooling
+# (ci-runner/observability/ci-runner-heartbeat.sh) posts a liveness gauge to a
+# LOCAL collector on 127.0.0.1:4319, and from 2026-08-15 to 2026-08-23 no
+# collector existed on that host: the heartbeat failed 12x/hour for eight
+# days and nothing noticed (livespec work-item livespec-s43svm.20). Everything
+# here exports to the `livespec` Honeycomb environment — the one the fleet's
+# CI telemetry (github-ci dataset) already lives in — NOT to agent-activity,
+# so CI-host liveness sits beside the CI runs it gates, and so the factory
+# host's single-host resource triggers on agent-activity/livespec-host-metrics
+# are not contaminated by a second host's numbers.
+#
+# Install/upgrade on the host with scripts/install-ci-runner-host.sh (see
+# README.md § "CI runner host"). Env: /etc/otel-collector/.env carries
+# HONEYCOMB_INGEST_KEY_LIVESPEC (+ HONEYCOMB_API_ENDPOINT), rendered from the
+# livespec 1Password Environment — never committed, never echoed.
+#
+# Marker: bump collector.otel-collector.version in transform/mark on every
+# change to this file (same convention as config.yaml).
+
+receivers:
+  otlp:
+    protocols:
+      # Loopback-only, same posture as config.yaml. 4317 gRPC for SDKs; 4319
+      # OTLP/HTTP is the port the ci-runner-heartbeat.sh curl POSTs to (it
+      # cannot speak gRPC). 4319 rather than 4318 so the three deployment
+      # shapes agree on one loopback HTTP port for shell emitters.
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4319
+
+  # Host resource metrics — same scraper set and exclusions as config.yaml,
+  # minus docker_stats (this host runs containerd under k3s; per-pod resource
+  # attribution comes from kubeletstats below instead).
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      load:
+      memory:
+        metrics:
+          system.linux.memory.available:
+            enabled: true
+      paging:
+      disk:
+      network:
+      filesystem:
+        exclude_mount_points:
+          mount_points:
+            - /proc/*
+            - /sys/*
+            - /run/*
+            - /dev/*
+            - /var/lib/docker/*
+            - /var/lib/rancher/*
+            - /var/lib/kubelet/*
+            - /snap/*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - pstore
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tmpfs
+            - tracefs
+          match_type: strict
+
+  # k3s cluster-level health: node conditions, pod phases, deployment
+  # available/desired replicas (the ARC controller, the per-repo ARC
+  # listeners, the Kueue controller-manager), resource quotas. Talks to the
+  # API server with the scoped ServiceAccount kubeconfig the installer renders
+  # at /etc/otel-collector/kubeconfig (KUBECONFIG is set in the unit) — never
+  # the admin k3s.yaml.
+  k8s_cluster:
+    auth_type: kubeConfig
+    collection_interval: 30s
+    node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
+    allocatable_types_to_report: [cpu, memory, ephemeral-storage, pods]
+
+  # Per-node / per-pod / per-container resource usage from the kubelet's
+  # stats summary, proxied through the API server (auth_type kubeConfig
+  # means `endpoint` is the NODE NAME, not a host:port). Single-node cluster,
+  # so one receiver covers it; a second node would add a second instance.
+  kubeletstats:
+    auth_type: kubeConfig
+    endpoint: ${env:OTEL_K8S_NODE_NAME}
+    collection_interval: 30s
+    metric_groups: [node, pod, container]
+
+processors:
+  batch:
+    timeout: 5s
+
+  # Stamp host.name (and os.type) on everything. config.yaml omits this because
+  # its dataset is single-host; here every CI-runner host shares the env's one
+  # metrics dataset, so the dead-man trigger is FILTERED to host.name = <this
+  # host> (an ungrouped count filtered to one host fires on that host's
+  # silence; a grouped query cannot — see the homelab "Floor 1 — dead-man"
+  # trigger and livespec-s43svm.20).
+  resourcedetection/system:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+    override: false
+
+  # Marker processor, identical in purpose to config.yaml's: filter on
+  # collector.otel-collector = "washere" to see only data that passed through
+  # a collector in this repo. Version is per-config-file; this file starts its
+  # own series at ci-runner-host.1 (now .2).
+  transform/mark:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.2")
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.2")
+    log_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.2")
+
+exporters:
+  # ONE exporter: everything goes to the livespec env. Traces/logs auto-route
+  # by service.name (no dataset header), exactly like otlp/honeycomb_livespec
+  # in config.yaml. Metrics: the livespec env is a Honeycomb "Metrics 2.0"
+  # environment, so EVERY OTLP metric lands in its single `metrics` dataset
+  # and an x-honeycomb-dataset header is IGNORED there (measured 2026-08-23:
+  # a header naming livespec-host-metrics created nothing; the rows appeared
+  # in `metrics`). That differs from agent-activity, where the factory host's
+  # header-pinned livespec-host-metrics dataset exists as an events-type
+  # dataset. Host rows, the liveness gauges, and the k3s rows are therefore
+  # told apart by metric name + host.name, not by dataset; the liveness
+  # dead-man is COUNT_DATAPOINTS(livespec.ci_runners.active) filtered to
+  # host.name = <this host>.
+  otlp/honeycomb_livespec:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
+    logs:
+      receivers: [otlp]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
+    # On this host the only OTLP metrics emitter is ci-runner-heartbeat.sh.
+    # Two metrics pipelines with one destination: kept separate so the k3s
+    # receivers (high-cardinality per-pod rows) can be tuned or re-routed
+    # without touching the host/liveness path the triggers depend on.
+    metrics/host:
+      receivers: [hostmetrics, otlp]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
+    metrics/k3s:
+      receivers: [k8s_cluster, kubeletstats]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]

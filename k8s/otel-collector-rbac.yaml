@@ -1,0 +1,80 @@
+# k8s/otel-collector-rbac.yaml — the READ-ONLY cluster identity the CI-runner
+# host collector (config.ci-runner-host.yaml) uses for its k8s_cluster and
+# kubeletstats receivers. Applied by scripts/install-ci-runner-host.sh, which
+# then renders /etc/otel-collector/kubeconfig from the token Secret below so
+# the collector never touches the admin /etc/rancher/k3s/k3s.yaml.
+#
+# The rule set is the upstream receiver documentation's union: k8s_cluster
+# watches the listed core/apps/batch/autoscaling objects; kubeletstats over
+# auth_type=kubeConfig reaches the kubelet's stats summary via the API
+# server proxy, which needs nodes/proxy and nodes/stats. Nothing here grants
+# write, exec, or secret read.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: observability
+---
+# Long-lived token so the host-side collector can hold a static kubeconfig.
+# (A TokenRequest-minted token would expire and the systemd unit has no
+# refresh loop; the installer re-renders the kubeconfig on every run anyway.)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: otel-collector-token
+  namespace: observability
+  annotations:
+    kubernetes.io/service-account.name: otel-collector
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+  - apiGroups: [""]
+    resources:
+      - events
+      - namespaces
+      - namespaces/status
+      - nodes
+      - nodes/spec
+      - nodes/stats
+      - nodes/proxy
+      - pods
+      - pods/status
+      - replicationcontrollers
+      - replicationcontrollers/status
+      - resourcequotas
+      - services
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [daemonsets, deployments, replicasets, statefulsets]
+    verbs: [get, list, watch]
+  - apiGroups: [extensions]
+    resources: [daemonsets, deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: observability

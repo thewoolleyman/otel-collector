@@ -35,8 +35,81 @@ If you'd rather run the binary directly, install [`otelcol-contrib`](https://git
 
 ### Running it as a background service
 
+- **Linux (CI runner host):** see [CI runner host](#ci-runner-host-linux-systemd-k3s) below — installer-driven, dedicated system user, k3s receivers.
 - **Linux:** a `systemd` unit works well — `Type=simple`, `User=<you>`, `EnvironmentFile=<path>/.env`, `ExecStart=/usr/local/bin/otelcol-contrib --config=<path>/config.yaml`. This host runs it exactly that way.
 - **macOS:** use `docker compose up -d` (Docker Desktop can start it at login), or a `launchd` LaunchAgent running the same `otelcol-contrib` command.
+
+## CI runner host (Linux, systemd, k3s)
+
+The self-hosted CI runner host (`poweredge-xubuntu`: k3s + Actions Runner
+Controller + Kueue, carrying every livespec fleet repository's gating CI) runs
+a SECOND deployment shape of this collector, `config.ci-runner-host.yaml`,
+installed by `scripts/install-ci-runner-host.sh`. It exists because the
+CI-runner kit in `livespec-dev-tooling` (`ci-runner/observability/`) posts a
+5-minute liveness gauge to a local collector on `127.0.0.1:4319`; for eight
+days (2026-08-15 → 2026-08-23) no collector was there and the heartbeat
+failed twelve times an hour unnoticed (livespec `livespec-s43svm.20`).
+
+What it carries, all into the **`livespec`** Honeycomb environment (the one the
+fleet's `github-ci` telemetry already lives in — NOT `agent-activity`, so the
+factory host's single-host resource triggers are not mixed with a second host):
+
+| Pipeline | Receivers | Where it lands in `livespec` |
+|---|---|---|
+| `metrics/host` | `hostmetrics` + `otlp` (the liveness gauges) | the env's single `metrics` dataset |
+| `metrics/k3s` | `k8s_cluster` + `kubeletstats` | the env's single `metrics` dataset |
+| `traces`, `logs` | `otlp` | auto-routed by `service.name` |
+
+`livespec` is a Honeycomb **Metrics 2.0** environment: every OTLP metric lands in
+its one `metrics` dataset and an `x-honeycomb-dataset` header is ignored
+(measured 2026-08-23 — a header naming `livespec-host-metrics` created nothing).
+Rows are told apart by metric name + `host.name`, not by dataset. This differs
+from `agent-activity`, where the factory host's header-pinned
+`livespec-host-metrics` is an events-type dataset — which is also why a bare
+`COUNT` dead-man works there but the CI-runner dead-man must use
+`COUNT_DATAPOINTS(livespec.ci_runners.active)`.
+
+Every row is stamped with `host.name` (`resourcedetection/system`), because the
+liveness dead-man trigger is an **ungrouped COUNT filtered to one host** — the
+only trigger shape that fires on a host's silence (a grouped query has no group
+to evaluate when the host is silent; measured with a paired probe on the homelab
+"Floor 1 — dead-man" trigger).
+
+### Onboarding / upgrading the host
+
+```bash
+# 0. On a host that has the livespec 1Password Environment wrapper, render the
+#    secret env file on the runner host WITHOUT the value touching a terminal.
+/usr/local/bin/with-livespec-env.sh -- sh -c \
+  'printf "HONEYCOMB_INGEST_KEY_LIVESPEC=%s\n" "$HONEYCOMB_INGEST_KEY_LIVESPEC"' \
+  | ssh poweredge-xubuntu 'sudo install -o root -g root -m 0600 /dev/stdin /etc/otel-collector/.env'
+# (create /etc/otel-collector first if it does not exist: sudo install -d -m 0755 /etc/otel-collector)
+
+# 1. Copy this repo (or just config.ci-runner-host.yaml, k8s/, systemd/, scripts/)
+#    to the host and run the installer as root. Idempotent; re-run to upgrade.
+sudo scripts/install-ci-runner-host.sh
+```
+
+The installer pins `otelcol-contrib` **0.147.0** (the version every other
+deployment of this repo runs; the OTTL gotchas in `CLAUDE.md` were measured on
+it), verifies the upstream sha256, creates the unprivileged `otel-collector`
+system user, applies `k8s/otel-collector-rbac.yaml` (a read-only ClusterRole +
+ServiceAccount), and renders `/etc/otel-collector/kubeconfig` from that
+ServiceAccount's token — so the running collector never holds the admin
+`k3s.yaml`. Live files under `/etc/otel-collector/` and
+`/etc/systemd/system/otel-collector.service` are OUTPUTS of the installer; edit
+the source here and re-run.
+
+Verify after install:
+
+```bash
+systemctl is-active otel-collector                 # active
+ss -ltn | grep -E '4317|4319'                      # both loopback listeners
+systemctl start ci-runner-heartbeat.service        # the kit's heartbeat now exits 0
+```
+
+and in Honeycomb (env `livespec`, dataset `metrics`):
+`COUNT_DATAPOINTS(livespec.ci_runners.active) where host.name = poweredge-xubuntu`.
 
 ## Pointing Claude Code at the collector
 

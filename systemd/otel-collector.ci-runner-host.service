@@ -1,0 +1,43 @@
+# otel-collector.service — the host OTel Collector on a self-hosted CI RUNNER
+# host (poweredge-xubuntu), running config.ci-runner-host.yaml.
+#
+# Source of truth: https://github.com/thewoolleyman/otel-collector
+# (systemd/otel-collector.ci-runner-host.service). Installed to
+# /etc/systemd/system/otel-collector.service by scripts/install-ci-runner-host.sh;
+# re-run the installer to change the live copy, never hand-edit it.
+#
+# Contrast the factory host's unit (documented in README.md): that one runs as
+# the human `ubuntu` user out of the repo checkout; this one runs as a dedicated
+# unprivileged system user out of /etc/otel-collector, because the CI-runner
+# host has no resident repo checkout and the collector must not inherit a
+# human's cluster credential.
+[Unit]
+Description=otel-collector — host OTel Collector on the CI-runner host (livespec env)
+Documentation=https://github.com/thewoolleyman/otel-collector
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=otel-collector
+Group=otel-collector
+# Non-secret, host-rendered by the installer: OTEL_K8S_NODE_NAME and the
+# HONEYCOMB_API_ENDPOINT default. Listed FIRST so a value in .env wins.
+EnvironmentFile=/etc/otel-collector/host.env
+# Secret: HONEYCOMB_INGEST_KEY_LIVESPEC (+ optional HONEYCOMB_API_ENDPOINT).
+# Read by systemd as root before the privilege drop; mode 0600 root:root.
+EnvironmentFile=/etc/otel-collector/.env
+# Scoped read-only ServiceAccount kubeconfig (k8s/otel-collector-rbac.yaml),
+# rendered by the installer; the admin k3s.yaml is never used.
+Environment=KUBECONFIG=/etc/otel-collector/kubeconfig
+ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otel-collector/config.yaml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/otel-collector
+
+[Install]
+WantedBy=multi-user.target
