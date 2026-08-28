@@ -1,0 +1,41 @@
+# otel-collector.service — the host OTel Collector on the `hp-xubuntu` Fabro
+# FACTORY host, running config.hp-factory.yaml.
+#
+# Source of truth: https://github.com/thewoolleyman/otel-collector
+# (systemd/otel-collector.hp-factory-host.service). Installed to
+# /etc/systemd/system/otel-collector.service by
+# scripts/install-hp-factory-host.sh; re-run the installer to change the live
+# copy, never hand-edit it.
+#
+# Dedicated unprivileged system user (matching config.ci-runner-host.yaml's
+# shape, not config.yaml's — hp has no resident human's repo checkout to run
+# this out of, and it should not inherit a human's credentials). Added to the
+# `docker` group by the installer for the docker_stats receiver.
+[Unit]
+Description=otel-collector — host OTel Collector on the hp-xubuntu Fabro factory host (agent-activity env, livespec-host-metrics dataset)
+Documentation=https://github.com/thewoolleyman/otel-collector
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=otel-collector
+Group=otel-collector
+# Secret: HONEYCOMB_API_KEY (+ optional HONEYCOMB_API_ENDPOINT). Read by
+# systemd as root before the privilege drop; mode 0600 root:root.
+EnvironmentFile=/etc/otel-collector/.env
+ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otel-collector/config.yaml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/otel-collector
+# /var/run/docker.sock is under ProtectSystem=strict's read/write scope by
+# group membership, not by a path exception — ProtectSystem restricts WRITES
+# to the filesystem hierarchy, not socket I/O the process's group already
+# grants it.
+
+[Install]
+WantedBy=multi-user.target

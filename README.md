@@ -36,6 +36,7 @@ If you'd rather run the binary directly, install [`otelcol-contrib`](https://git
 ### Running it as a background service
 
 - **Linux (CI runner host):** see [CI runner host](#ci-runner-host-linux-systemd-k3s) below — installer-driven, dedicated system user, k3s receivers.
+- **Linux (hp factory host):** see [hp factory host](#hp-factory-host-linux-systemd-host-metrics-only) below — installer-driven, dedicated system user, host/container metrics only.
 - **Linux:** a `systemd` unit works well — `Type=simple`, `User=<you>`, `EnvironmentFile=<path>/.env`, `ExecStart=/usr/local/bin/otelcol-contrib --config=<path>/config.yaml`. This host runs it exactly that way.
 - **macOS:** use `docker compose up -d` (Docker Desktop can start it at login), or a `launchd` LaunchAgent running the same `otelcol-contrib` command.
 
@@ -110,6 +111,62 @@ systemctl start ci-runner-heartbeat.service        # the kit's heartbeat now exi
 
 and in Honeycomb (env `livespec`, dataset `metrics`):
 `COUNT_DATAPOINTS(livespec.ci_runners.active) where host.name = poweredge-xubuntu`.
+
+## hp factory host (Linux, systemd, host metrics only)
+
+The second Fabro factory host, `hp-xubuntu`, runs a THIRD deployment shape,
+`config.hp-factory.yaml`, installed by `scripts/install-hp-factory-host.sh`.
+It exists to answer one question `hp` could not answer before: how much free
+disk space does this host have right now
+(`livespec-orchestrator-beads-fabro` `bd-ib-bdcmok`, requirement R2, Route A,
+maintainer-decided 2026-08-29). `hp` does not run interactive Claude Code
+sessions and already has a separate receiver for Fabro sandbox worker
+telemetry (`livespec-orchestrator-beads-fabro`'s `otel_receiver_daemon.py` on
+`172.17.0.1:4318`) — this collector does not duplicate that; it carries only
+`hostmetrics` + `docker_stats`, no OTLP receiver at all.
+
+Everything lands in the **`agent-activity`** Honeycomb environment's
+`livespec-host-metrics` dataset — the SAME dataset `vps`'s `config.yaml`
+`metrics/host` pipeline already writes to. One dataset, one alert threshold,
+both factory hosts, instead of two dashboards kept in sync by hand. Both
+sides now stamp `resourcedetection/system` so rows stay distinguishable by
+`host.name`.
+
+The cost: this host now holds a copy of the `agent-activity` env's
+`HONEYCOMB_API_KEY` — an internal-only credential, not customer-facing, on a
+host this fleet already fully controls — where before it held only the
+`livespec` env's ingest key for its sandbox-telemetry receiver.
+
+`hp`'s `/var/lib/docker` and `/var/lib/containerd` are bind mounts of
+`/data/docker` and `/data/containerd` (`/etc/fstab`) — the same filesystem as
+`/data`, so `df`-style free-space accounting reports identical numbers for
+all three. `config.hp-factory.yaml` excludes both bind-mount aliases from the
+filesystem scraper and keeps `/data` itself; nothing is lost, three duplicate
+rows are.
+
+### Onboarding / upgrading the host
+
+```bash
+# 0. Render the secret env file on hp WITHOUT the value touching a terminal.
+#    Same key vps's collector already uses -- copy it from there, not from a
+#    fresh 1Password read, so there is exactly one place this key is fetched.
+sudo grep '^HONEYCOMB_API_KEY=\|^HONEYCOMB_API_ENDPOINT=' /data/projects/otel-collector/.env \
+  | ssh hp-xubuntu 'sudo install -d -m 0755 /etc/otel-collector && sudo install -o root -g root -m 0600 /dev/stdin /etc/otel-collector/.env'
+
+# 1. Copy this repo (or just config.hp-factory.yaml, systemd/, scripts/) to
+#    the host and run the installer as root. Idempotent; re-run to upgrade.
+sudo scripts/install-hp-factory-host.sh
+```
+
+Verify after install:
+
+```bash
+systemctl is-active otel-collector                 # active
+journalctl -u otel-collector --no-pager -n 30       # no errors, no permission denied
+```
+
+and in Honeycomb (env `agent-activity`, dataset `livespec-host-metrics`):
+a row for `host.name = hp-xubuntu` alongside the existing `vps` rows.
 
 ## Pointing Claude Code at the collector
 

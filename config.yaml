@@ -95,6 +95,21 @@ processors:
   batch:
     timeout: 5s
 
+  # STAMP host.name EXPLICITLY on host/container metrics. Added 2026-08-29
+  # when livespec-host-metrics stopped being single-host: hp-xubuntu now
+  # writes into the SAME dataset via config.hp-factory.yaml (Route A of
+  # livespec-orchestrator-beads-fabro bd-ib-bdcmok.3), so this host's rows
+  # need an explicit host identity to stay distinguishable from hp's, on the
+  # SAME basis config.ci-runner-host.yaml already established for its own
+  # multi-emitter dataset. Scoped to the metrics/host pipeline only — traces,
+  # logs, and the Claude-Code app-metrics pipeline stay single-host (this
+  # collector, this session) and don't need it.
+  resourcedetection/system:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+    override: false
+
   # Marker processor: stamps every signal (traces, metrics, logs) with proof
   # that it passed through this collector. Filter on
   # collector.otel-collector="washere" in Honeycomb to see only data that
@@ -106,17 +121,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.10")
+          - set(attributes["collector.otel-collector.version"], "0.11")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.10")
+          - set(attributes["collector.otel-collector.version"], "0.11")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.10")
+          - set(attributes["collector.otel-collector.version"], "0.11")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -281,5 +296,5 @@ service:
     # while OTLP-received app metrics keep their existing auto-routing above.
     metrics/host:
       receivers: [hostmetrics, docker_stats]
-      processors: [transform/mark, batch]
+      processors: [resourcedetection/system, transform/mark, batch]
       exporters: [otlp/honeycomb_hostmetrics]
