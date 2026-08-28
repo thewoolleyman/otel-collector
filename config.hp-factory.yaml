@@ -1,0 +1,159 @@
+# config.hp-factory.yaml — the collector for the `hp-xubuntu` Fabro FACTORY
+# host, running host-resource + container metrics ONLY into the agent-activity
+# env's `livespec-host-metrics` dataset — the SAME dataset config.yaml's
+# `metrics/host` pipeline already feeds from the `vps` factory host.
+#
+# This is the THIRD deployment shape of this repo, beside config.yaml (the
+# vps factory host, which ALSO carries Claude-Code Agentic-Timeline shaping
+# because interactive sessions run there) and config.ci-runner-host.yaml (the
+# CI-runner host, livespec env, k3s receivers). hp does not run interactive
+# Claude Code sessions and already has a SEPARATE receiver
+# (livespec-orchestrator-beads-fabro's otel_receiver_daemon.py, listening on
+# 172.17.0.1:4318) for Fabro sandbox worker telemetry — this collector does
+# NOT duplicate that. It exists purely to answer one question hp could not
+# answer before: how much free disk space does this host have right now.
+#
+# WHY ONE DATASET FOR BOTH HOSTS (livespec-orchestrator-beads-fabro
+# bd-ib-bdcmok.3, Route A, maintainer-decided 2026-08-29): a headroom alert
+# defined once, watching one dataset, beats two dashboards that must be kept
+# in sync by hand. The cost is a copy of the agent-activity env's
+# HONEYCOMB_API_KEY placed on a host that did not previously hold it — an
+# internal-only credential, not customer-facing, on a machine already fully
+# controlled by this fleet.
+#
+# NO OTLP RECEIVER: nothing on hp needs to PUSH telemetry into this collector
+# (no interactive Claude Code sessions, no shell OTLP/HTTP emitters like
+# bd-guard's — hp's `bd` usage, if any, is a separate question outside this
+# file's scope). Adding one is a future extension, not a default.
+#
+# Install/upgrade with scripts/install-hp-factory-host.sh (see README.md §
+# "hp factory host"). Env: /etc/otel-collector/.env carries HONEYCOMB_API_KEY
+# (+ optional HONEYCOMB_API_ENDPOINT) — the agent-activity env's key, NOT the
+# livespec one hp's existing sandbox-telemetry receiver already holds. Never
+# committed, never echoed.
+#
+# Marker: bump collector.otel-collector.version in transform/mark on every
+# change to this file (own series, independent of config.yaml's and
+# config.ci-runner-host.yaml's — same convention as those two).
+
+receivers:
+  # Host resource metrics — same scraper set as config.yaml (Phase P-host of
+  # fabro-ci-image-factoring), minus nothing: this host has the SAME
+  # trigger-reading needs (CPU saturation, RAM-available hard floor) as vps.
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      load:
+      memory:
+        metrics:
+          system.linux.memory.available:
+            enabled: true
+      paging:
+      disk:
+      filesystem:
+        # /var/lib/docker/* and /var/lib/containerd/* are BIND MOUNTS of
+        # /data/docker and /data/containerd (see /etc/fstab on hp) — the SAME
+        # block device and filesystem as /data itself. `df`-style free-space
+        # accounting is a property of the underlying filesystem, not the
+        # subdirectory queried, so all three report numerically IDENTICAL
+        # used/avail/total figures. Excluding the two bind-mount ALIASES here
+        # loses NO headroom visibility — /data (kept, not excluded) already
+        # carries it — and avoids three duplicate rows for one real number.
+        #
+        # This CORRECTS an earlier finding on bd-ib-bdcmok's research trail,
+        # which worried that excluding /var/lib/docker/* on hp (copying
+        # config.yaml's exclusion verbatim) would "silently hide the dominant
+        # mount". That would be true for a `du`-style measurement (where a
+        # bind-mounted subdirectory reports a genuinely smaller number than
+        # its parent), which is what this repo's `du -xsm` sizing calls
+        # measure elsewhere. It is NOT true for `df`-style free-space
+        # accounting, which is what a headroom gauge needs and what this
+        # scraper reports.
+        exclude_mount_points:
+          mount_points:
+            - /proc/*
+            - /sys/*
+            - /run/*
+            - /dev/*
+            - /var/lib/docker/*
+            - /var/lib/containerd/*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - pstore
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tmpfs
+            - tracefs
+          match_type: strict
+
+  # Per-container resource attribution, matching config.yaml. hp's `ubuntu`
+  # service user (see the systemd unit) is added to the `docker` group by the
+  # installer, exactly as vps's is.
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 30s
+
+processors:
+  batch:
+    timeout: 5s
+
+  # STAMP host.name EXPLICITLY. This is the one thing that makes "one shared
+  # dataset for two hosts" (Route A) actually deliver a usable view rather
+  # than an unreadable merge: without an explicit host.name, hp's rows and
+  # vps's rows are indistinguishable in livespec-host-metrics once both write
+  # to it, and neither a shared alert threshold nor a per-host view is
+  # possible. Same reasoning, same processor, as config.ci-runner-host.yaml's
+  # multi-host metrics/host pipeline — copied here rather than assumed away.
+  resourcedetection/system:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+    override: false
+
+  # Marker processor, identical in purpose to config.yaml's and
+  # config.ci-runner-host.yaml's: filter on collector.otel-collector =
+  # "washere" to see only data that passed through a collector in this repo.
+  transform/mark:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-host.1")
+
+exporters:
+  # SAME dataset config.yaml's metrics/host pipeline uses: agent-activity env
+  # (HONEYCOMB_API_KEY), x-honeycomb-dataset: livespec-host-metrics. This is
+  # the whole point of Route A — one dataset, one threshold, both hosts.
+  otlp/honeycomb_hostmetrics:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_API_KEY}
+      x-honeycomb-dataset: livespec-host-metrics
+
+service:
+  pipelines:
+    metrics/host:
+      receivers: [hostmetrics, docker_stats]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_hostmetrics]
