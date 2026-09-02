@@ -1,0 +1,43 @@
+# otel-collector-identity.service — re-create the host collector's read-only
+# cluster identity on every boot of the CI RUNNER host (poweredge-xubuntu),
+# before otel-collector.service starts.
+#
+# Source of truth: https://github.com/thewoolleyman/otel-collector
+# (systemd/otel-collector-identity.ci-runner-host.service). Installed to
+# /etc/systemd/system/otel-collector-identity.service by
+# scripts/install-ci-runner-host.sh; re-run the installer to change the live
+# copy, never hand-edit it.
+#
+# Why this unit exists: the host's k3s datastore
+# (/var/lib/rancher/k3s/server/db, the livespec-dev-tooling kit's
+# var-lib-rancher-k3s-server-db.mount) is a tmpfs and is EMPTY at every boot.
+# The whole CI cluster stack is rebuilt from git after k3s comes up
+# (inject-github-app-secret.service, then converge-ci-stack.service) — and so
+# must the collector's `observability/otel-collector` ServiceAccount and its
+# token Secret, which the wipe also takes. A kubeconfig rendered by a previous
+# installer run holds a token the fresh API server has never seen, and the
+# collector crash-loops on `k8s_cluster receiver: ... Unauthorized` until
+# someone re-runs the installer by hand (measured 2026-09-02: 300+ restarts
+# after the 12:14Z reboot, taking the CI heartbeat on 127.0.0.1:4319 with it).
+# This oneshot re-applies k8s/otel-collector-rbac.yaml and re-renders
+# /etc/otel-collector/kubeconfig from the new token, and otel-collector.service
+# orders itself After= it, so the identity reconstructs from git with no hand
+# step.
+#
+# Requires=k3s.service (not just After=) because without the API server there
+# is nothing to render from; the render script itself waits for /readyz, since
+# k3s.service reaching `active` precedes the apiserver actually answering.
+[Unit]
+Description=otel-collector-identity — render the collector's read-only k3s ServiceAccount kubeconfig
+Documentation=https://github.com/thewoolleyman/otel-collector
+After=k3s.service
+Requires=k3s.service
+Before=otel-collector.service
+
+[Service]
+Type=oneshot
+Environment=KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ExecStart=/usr/local/lib/otel-collector/render-k8s-identity.sh
+
+[Install]
+WantedBy=multi-user.target

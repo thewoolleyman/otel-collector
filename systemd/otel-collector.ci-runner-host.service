@@ -11,11 +11,16 @@
 # unprivileged system user out of /etc/otel-collector, because the CI-runner
 # host has no resident repo checkout and the collector must not inherit a
 # human's cluster credential.
+#
+# It also orders itself after otel-collector-identity.service: the k3s
+# datastore is a tmpfs wiped at every boot, so the ServiceAccount behind
+# /etc/otel-collector/kubeconfig must be re-created and the kubeconfig
+# re-rendered before this collector can authenticate (see that unit's header).
 [Unit]
 Description=otel-collector — host OTel Collector on the CI-runner host (livespec env)
 Documentation=https://github.com/thewoolleyman/otel-collector
-After=network-online.target k3s.service
-Wants=network-online.target
+After=network-online.target k3s.service otel-collector-identity.service
+Wants=network-online.target otel-collector-identity.service
 
 [Service]
 Type=simple
@@ -28,7 +33,8 @@ EnvironmentFile=/etc/otel-collector/host.env
 # Read by systemd as root before the privilege drop; mode 0600 root:root.
 EnvironmentFile=/etc/otel-collector/.env
 # Scoped read-only ServiceAccount kubeconfig (k8s/otel-collector-rbac.yaml),
-# rendered by the installer; the admin k3s.yaml is never used.
+# rendered by otel-collector-identity.service on every boot (and once by the
+# installer); the admin k3s.yaml is never used.
 Environment=KUBECONFIG=/etc/otel-collector/kubeconfig
 ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otel-collector/config.yaml
 Restart=on-failure

@@ -97,13 +97,29 @@ it), verifies the upstream sha256, creates the unprivileged `otel-collector`
 system user, applies `k8s/otel-collector-rbac.yaml` (a read-only ClusterRole +
 ServiceAccount), and renders `/etc/otel-collector/kubeconfig` from that
 ServiceAccount's token — so the running collector never holds the admin
-`k3s.yaml`. Live files under `/etc/otel-collector/` and
-`/etc/systemd/system/otel-collector.service` are OUTPUTS of the installer; edit
-the source here and re-run.
+`k3s.yaml`. Live files under `/etc/otel-collector/`,
+`/usr/local/lib/otel-collector/`, and `/etc/systemd/system/otel-collector*.service`
+are OUTPUTS of the installer; edit the source here and re-run.
+
+**The cluster identity is re-rendered on every boot**, not only at install
+time. The host's k3s datastore is a tmpfs (the `livespec-dev-tooling` kit's
+`var-lib-rancher-k3s-server-db.mount`), EMPTY at each boot, so the
+`observability/otel-collector` ServiceAccount and its token Secret vanish with
+it and a kubeconfig rendered once would carry a token the fresh API server has
+never seen (measured 2026-09-02: `k8s_cluster receiver: ... Unauthorized`,
+300+ restarts, and the CI heartbeat on `127.0.0.1:4319` down with it). The
+installer therefore also installs `scripts/render-k8s-identity.sh` + the RBAC
+manifest into `/usr/local/lib/otel-collector/` and enables
+`otel-collector-identity.service`
+(`systemd/otel-collector-identity.ci-runner-host.service`), a oneshot ordered
+after `k3s.service` and before `otel-collector.service` that waits for the API
+server's `/readyz`, re-applies the manifest, and re-renders the kubeconfig from
+the new token — the identity reconstructs from git with no hand step.
 
 Verify after install:
 
 ```bash
+systemctl is-enabled otel-collector-identity       # enabled (boot-time re-render)
 systemctl is-active otel-collector                 # active
 ss -ltn | grep -E '4317|4319'                      # both loopback listeners
 systemctl start ci-runner-heartbeat.service        # the kit's heartbeat now exits 0
