@@ -1,8 +1,11 @@
 # k8s/otel-collector-rbac.yaml — the READ-ONLY cluster identity the CI-runner
 # host collector (config.ci-runner-host.yaml) uses for its k8s_cluster and
-# kubeletstats receivers. Applied by scripts/install-ci-runner-host.sh, which
-# then renders /etc/otel-collector/kubeconfig from the token Secret below so
-# the collector never touches the admin /etc/rancher/k3s/k3s.yaml.
+# kubeletstats receivers. Applied by scripts/render-k8s-identity.sh (installed
+# by scripts/install-ci-runner-host.sh and run on every boot by
+# otel-collector-identity.service, because the k3s datastore is a tmpfs that
+# wipes these objects at each boot), which then renders
+# /etc/otel-collector/kubeconfig from the token Secret below so the collector
+# never touches the admin /etc/rancher/k3s/k3s.yaml.
 #
 # The rule set is the upstream receiver documentation's union: k8s_cluster
 # watches the listed core/apps/batch/autoscaling objects; kubeletstats over
@@ -22,7 +25,8 @@ metadata:
 ---
 # Long-lived token so the host-side collector can hold a static kubeconfig.
 # (A TokenRequest-minted token would expire and the systemd unit has no
-# refresh loop; the installer re-renders the kubeconfig on every run anyway.)
+# refresh loop; the kubeconfig is re-rendered on every boot and installer run
+# anyway.)
 apiVersion: v1
 kind: Secret
 metadata:

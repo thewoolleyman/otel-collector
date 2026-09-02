@@ -19,21 +19,29 @@
 #      render the file without the value ever touching a terminal.
 #   5. Renders /etc/otel-collector/host.env (non-secret: OTEL_K8S_NODE_NAME,
 #      HONEYCOMB_API_ENDPOINT default).
-#   6. Applies k8s/otel-collector-rbac.yaml with the admin kubeconfig and
-#      renders /etc/otel-collector/kubeconfig (0640 root:otel-collector) from
-#      the read-only ServiceAccount token, so the running collector never holds
+#   6. Installs k8s/otel-collector-rbac.yaml + scripts/render-k8s-identity.sh
+#      into /usr/local/lib/otel-collector/, installs + enables
+#      otel-collector-identity.service (a oneshot that runs the render script
+#      after k3s.service and before otel-collector.service on EVERY boot —
+#      the k3s datastore is a tmpfs, so the ServiceAccount is wiped at each
+#      boot), then runs the render script once now: it applies the RBAC
+#      manifest with the admin kubeconfig and renders
+#      /etc/otel-collector/kubeconfig (0640 root:otel-collector) from the
+#      read-only ServiceAccount token, so the running collector never holds
 #      the admin credential.
-#   7. Installs the systemd unit, daemon-reloads, enables + (re)starts it, and
-#      proves the loopback receivers are listening.
+#   7. Installs the collector's systemd unit, daemon-reloads, enables +
+#      (re)starts it, and proves the loopback receivers are listening.
 #
 # Recreatability rule (same as the livespec-dev-tooling ci-runner kit): the
-# live copies under /etc/otel-collector and /etc/systemd/system are OUTPUTS of
-# this script; edit the source here and re-run, never the live files.
+# live copies under /etc/otel-collector, /usr/local/lib/otel-collector, and
+# /etc/systemd/system are OUTPUTS of this script; edit the source here and
+# re-run, never the live files.
 set -euo pipefail
 
 OTELCOL_VERSION="${OTELCOL_VERSION:-0.147.0}"
 src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 etc_dir=/etc/otel-collector
+lib_dir=/usr/local/lib/otel-collector
 svc_user=otel-collector
 admin_kubeconfig="${ADMIN_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
@@ -111,43 +119,18 @@ ENV
 chmod 0644 "$etc_dir/host.env"
 
 # 6. cluster identity -----------------------------------------------------------
-export KUBECONFIG="$admin_kubeconfig"
-kubectl apply -f "$src_dir/k8s/otel-collector-rbac.yaml"
-token=""
-for _ in $(seq 1 30); do
-  token="$(kubectl -n observability get secret otel-collector-token -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)"
-  [[ -n "$token" ]] && break
-  sleep 1
-done
-if [[ -z "$token" ]]; then
-  echo "install-ci-runner-host.sh: ServiceAccount token never populated" >&2
-  exit 1
-fi
-ca_b64="$(kubectl -n observability get secret otel-collector-token -o jsonpath='{.data.ca\.crt}')"
-umask 027
-cat > "$etc_dir/kubeconfig" <<KC
-apiVersion: v1
-kind: Config
-clusters:
-- name: k3s
-  cluster:
-    server: https://127.0.0.1:6443
-    certificate-authority-data: ${ca_b64}
-contexts:
-- name: otel-collector@k3s
-  context:
-    cluster: k3s
-    user: otel-collector
-current-context: otel-collector@k3s
-users:
-- name: otel-collector
-  user:
-    token: ${token}
-KC
-umask 022
-chown "root:${svc_user}" "$etc_dir/kubeconfig"
-chmod 0640 "$etc_dir/kubeconfig"
-unset token
+# The render script + the manifest it applies live under /usr/local/lib so the
+# boot-time unit can run them with no repo checkout on the host. The script is
+# the single implementation; this installer just calls it once now.
+install -o root -g root -m 0755 -d "$lib_dir"
+install -o root -g root -m 0644 "$src_dir/k8s/otel-collector-rbac.yaml" "$lib_dir/otel-collector-rbac.yaml"
+install -o root -g root -m 0755 "$src_dir/scripts/render-k8s-identity.sh" "$lib_dir/render-k8s-identity.sh"
+install -o root -g root -m 0644 \
+  "$src_dir/systemd/otel-collector-identity.ci-runner-host.service" \
+  /etc/systemd/system/otel-collector-identity.service
+systemctl daemon-reload
+systemctl enable otel-collector-identity.service >/dev/null
+KUBECONFIG="$admin_kubeconfig" "$lib_dir/render-k8s-identity.sh"
 
 # 7. unit ---------------------------------------------------------------------
 install -o root -g root -m 0644 \
