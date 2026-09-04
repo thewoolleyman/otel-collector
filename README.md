@@ -51,6 +51,17 @@ CI-runner kit in `livespec-dev-tooling` (`ci-runner/observability/`) posts a
 days (2026-08-15 → 2026-08-23) no collector was there and the heartbeat
 failed twelve times an hour unnoticed (livespec `livespec-s43svm.20`).
 
+Since 2026-09-04 the same config also carries a POD-REACHABLE, KEYLESS
+OTLP/HTTP receiver (`otlp/pods`, `10.42.0.1:4319` on the cni0 bridge, traces
+pipeline only): the runner pool's hook pod template posts per-job cache spans
+(`service.name=github-ci`) there, because a workflow pod cannot reach loopback
+and no ingest key may enter a self-hosted job (livespec-dev-tooling plan
+`ci-runner-cache-tiers`, research/003). Binding to the bridge address is the
+whole access control: reachable from the pod CIDR and this host, from nothing
+on the LAN or Tailscale. The bridge appears with k3s's first pod, so a
+collector started before it fails to bind once and `Restart=on-failure`
+converges it.
+
 What it carries, all into the **`livespec`** Honeycomb environment (the one the
 fleet's `github-ci` telemetry already lives in — NOT `agent-activity`, so the
 factory host's single-host resource triggers are not mixed with a second host):
@@ -121,7 +132,7 @@ Verify after install:
 ```bash
 systemctl is-enabled otel-collector-identity       # enabled (boot-time re-render)
 systemctl is-active otel-collector                 # active
-ss -ltn | grep -E '4317|4319'                      # both loopback listeners
+ss -ltn | grep -E '4317|4319'                      # 127.0.0.1:4317, 127.0.0.1:4319, 10.42.0.1:4319
 systemctl start ci-runner-heartbeat.service        # the kit's heartbeat now exits 0
 ```
 

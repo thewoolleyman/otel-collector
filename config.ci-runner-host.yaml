@@ -35,6 +35,23 @@ receivers:
       http:
         endpoint: 127.0.0.1:4319
 
+  # Pod-reachable, KEYLESS OTLP/HTTP receiver for the runner pool's job pods
+  # (livespec-dev-tooling plan ci-runner-cache-tiers, research/003 "Why the
+  # pod cannot just send to Honeycomb today"): a workflow pod cannot reach
+  # loopback, and no ingest key may enter a self-hosted job, so the pool's
+  # hook pod template posts its per-job cache spans (service.name=github-ci)
+  # here instead. Bound to the cni0 bridge address ONLY — 10.42.0.1 is
+  # reachable from the pod CIDR (10.42.0.0/24) and from this host, and from
+  # nothing on the LAN or Tailscale — which is the "restricted to the pod
+  # CIDR" of the contract without a firewall rule to drift. Same port as the
+  # loopback HTTP listener so shell emitters carry one number. The bridge
+  # exists only once k3s has created its first pod, so an early start fails
+  # to bind and the unit's Restart=on-failure (5s) converges it.
+  otlp/pods:
+    protocols:
+      http:
+        endpoint: 10.42.0.1:4319
+
   # Host resource metrics — same scraper set and exclusions as config.yaml,
   # minus docker_stats (this host runs containerd under k3s; per-pod resource
   # attribution comes from kubeletstats below instead).
@@ -137,17 +154,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.2")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.3")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.2")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.3")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.2")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.3")
 
 exporters:
   # ONE exporter: everything goes to the livespec env. Traces/logs auto-route
@@ -170,7 +187,7 @@ exporters:
 service:
   pipelines:
     traces:
-      receivers: [otlp]
+      receivers: [otlp, otlp/pods]
       processors: [resourcedetection/system, transform/mark, batch]
       exporters: [otlp/honeycomb_livespec]
     logs:
