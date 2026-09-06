@@ -72,6 +72,13 @@ factory host's single-host resource triggers are not mixed with a second host):
 | `metrics/k3s` | `k8s_cluster` + `kubeletstats` | the env's single `metrics` dataset |
 | `traces`, `logs` | `otlp` | auto-routed by `service.name` |
 
+`metrics/k3s` reads the kubelet (`kubeletstats`) and the API server
+(`k8s_cluster`) directly. It does NOT depend on k3s's bundled `metrics-server`
+or the Metrics API (`metrics.k8s.io`) it serves — verified 2026-09-06 when the
+maintainer asked whether disabling `metrics-server` would cripple Honeycomb: it
+would not (the cluster also runs zero HPAs), and it was left enabled anyway
+because its cost is negligible.
+
 `livespec` is a Honeycomb **Metrics 2.0** environment: every OTLP metric lands in
 its one `metrics` dataset and an `x-honeycomb-dataset` header is ignored
 (measured 2026-08-23 — a header naming `livespec-host-metrics` created nothing).
