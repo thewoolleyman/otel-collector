@@ -1,0 +1,39 @@
+{
+  "extraKnownMarketplaces": {
+    "livespec": {
+      "source": {
+        "source": "github",
+        "repo": "thewoolleyman/livespec",
+        "ref": "release"
+      }
+    },
+    "livespec-driver-claude": {
+      "source": {
+        "source": "github",
+        "repo": "thewoolleyman/livespec-driver-claude",
+        "ref": "release"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "livespec@livespec": true,
+    "livespec@livespec-driver-claude": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ensure_plugins.py\""
+          }
+        ]
+      }
+    ]
+  },
+  "livespecPluginCurrencySuccessor": {
+    "mechanism": "The SessionStart hook runs .claude/hooks/ensure_plugins.py to install and update the enabled plugins from settings.json.",
+    "documentedIn": "CLAUDE.md"
+  }
+}
