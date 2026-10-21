@@ -121,17 +121,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.11")
+          - set(attributes["collector.otel-collector.version"], "0.12")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.11")
+          - set(attributes["collector.otel-collector.version"], "0.12")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.11")
+          - set(attributes["collector.otel-collector.version"], "0.12")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -200,22 +200,26 @@ processors:
           - set(attributes["gen_ai.tool.name"], attributes["tool_name"]) where IsString(attributes["tool_name"])
           - set(span.name, Concat(["execute_tool ", attributes["tool_name"]], "")) where IsString(attributes["tool_name"])
 
-  # Split the single otlp trace stream by service.name so the livespec bd-guard
-  # spans (service.name=bd-guard, emitted by the host `bd` wrapper) route to the
-  # livespec Honeycomb env while everything else keeps going to agent-activity.
+  # Split the single otlp trace stream by service.name so the livespec spans
+  # route to the livespec Honeycomb env while everything else keeps going to
+  # agent-activity: service.name=bd-guard (emitted by the host `bd` wrapper) and
+  # service.name=livespec-delegated-gate (the delegated pre-push gate client's
+  # one outcome span per run, which livespec-dev-tooling's no-verdict trigger
+  # reads in the livespec env; livespec-dev-tooling-i4n2f5).
   # A span is DROPPED where its condition is true: `exclude_bd_guard` keeps
-  # bd-guard OUT of the agent-activity pipeline; `only_bd_guard` keeps ONLY
-  # bd-guard for the livespec pipeline.
+  # those services OUT of the agent-activity pipeline; `only_bd_guard` keeps
+  # ONLY them for the livespec pipeline.
   filter/exclude_bd_guard:
     error_mode: ignore
     traces:
       span:
         - 'resource.attributes["service.name"] == "bd-guard"'
+        - 'resource.attributes["service.name"] == "livespec-delegated-gate"'
   filter/only_bd_guard:
     error_mode: ignore
     traces:
       span:
-        - 'resource.attributes["service.name"] != "bd-guard"'
+        - 'resource.attributes["service.name"] != "bd-guard" and resource.attributes["service.name"] != "livespec-delegated-gate"'
 
   # The CI-runner liveness heartbeat (livespec-dev-tooling
   # ci-runner/observability/) posts one gauge to the loopback OTLP receiver;
