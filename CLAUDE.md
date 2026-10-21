@@ -164,3 +164,7 @@ Source: <https://docs.honeycomb.io/send-data/agents>.
 * Honeycomb Agent Timeline: <https://docs.honeycomb.io/send-data/agents>
 * OTel Collector transform processor: <https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/processor/transformprocessor>
 * OTTL language: <https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/pkg/ottl>
+
+## Livespec instruction-only adopter
+
+This repository is a livespec instruction-only adopter. It enables the `livespec` and `livespec-driver-claude` plugins. The SessionStart hook runs `.claude/hooks/ensure_plugins.py` to install and update those plugins from the committed settings.
