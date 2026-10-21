@@ -87,7 +87,7 @@ The defensive `where` on the `set(...)` is belt-and-suspenders against the same 
 After editing `config.yaml`:
 
 1. Bump `collector.otel-collector.version` in all three places (`transform/mark`).
-2. Restart the collector so it reloads `config.yaml`: `sudo systemctl restart otel-collector` on this host (systemd), or `docker compose restart` if you run it via compose.
+2. Get the collector onto the new `config.yaml`. On the livespec dev host (`vps`), `otel-collector.service` is managed by the `otel_collector` role in `thewoolleyman/livespec-dev-tooling` (`ansible/dev-host.yml`). The service reads `/etc/otel-collector/config.yaml`, installed from this repository's `main`, and never this checkout. So merge your change to `main`, then run the committed converge from a livespec-dev-tooling checkout on the control node: `just ansible-drift ansible/dev-host.yml --tags otel_collector` to see the diff, then `just ansible-apply ansible/dev-host.yml --tags otel_collector`. The role restarts the service only when its configuration or unit changed. Do not run `sudo systemctl restart otel-collector` by hand there: it would not pick up an unmerged edit, and it is a host change no drift report can see (see that repository's `ansible/README.md`). Anywhere else, use `docker compose restart` if you run it via compose.
 3. Have jessitron run something in her claude session, then query Honeycomb:
 
 ```
