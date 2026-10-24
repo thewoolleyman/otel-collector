@@ -139,9 +139,22 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "hp-factory-host.1")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-host.2")
 
 exporters:
+  # hp is ALSO a k3s cluster node (a factory-only agent), so its host metrics
+  # belong beside the cluster's kubelet rows in the `livespec` env too
+  # (livespec-dev-tooling plan kubernetes-node-observability, b7wwgy). A
+  # SECOND exporter rather than a move: the agent-activity triggers on
+  # livespec-host-metrics read hp's rows there and keep working unchanged.
+  # Host metrics only — docker_stats stays agent-activity-only. Needs
+  # HONEYCOMB_INGEST_KEY_LIVESPEC in /etc/otel-collector/.env beside the
+  # agent-activity key.
+  otlp/honeycomb_livespec:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
+
   # SAME dataset config.yaml's metrics/host pipeline uses: agent-activity env
   # (HONEYCOMB_API_KEY), x-honeycomb-dataset: livespec-host-metrics. This is
   # the whole point of Route A — one dataset, one threshold, both hosts.
@@ -157,3 +170,7 @@ service:
       receivers: [hostmetrics, docker_stats]
       processors: [resourcedetection/system, transform/mark, batch]
       exporters: [otlp/honeycomb_hostmetrics]
+    metrics/host_livespec:
+      receivers: [hostmetrics]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]

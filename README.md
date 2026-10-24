@@ -202,6 +202,27 @@ journalctl -u otel-collector --no-pager -n 30       # no errors, no permission d
 and in Honeycomb (env `agent-activity`, dataset `livespec-host-metrics`):
 a row for `host.name = hp-xubuntu` alongside the existing `vps` rows.
 
+## k3s agent host (Linux, systemd, host metrics only)
+
+`config.k3s-agent-host.yaml` is the collector for a k3s cluster node that is
+not the CI-runner host — today `gmktec-xubuntu`. It runs `hostmetrics` only and
+exports to the `livespec` environment's `metrics` dataset, stamped with
+`host.name`, beside the cluster's kubelet rows. It carries no Kubernetes
+receiver: the CI-runner host's collector already reads EVERY node's kubelet
+through the API-server proxy (`receiver_creator` over `k8s_observer`, from
+`ci-runner-host.4`), and a second reader would double every k8s row.
+
+`hp-xubuntu` is also a cluster node; its `config.hp-factory.yaml` sends the
+same host metrics to `livespec` through a second exporter
+(`metrics/host_livespec`, from `hp-factory-host.2`) while its agent-activity
+feed is unchanged.
+
+The CI pool nodes' collectors are converged by livespec-dev-tooling's
+`otel_collector` role from `ansible/ci-pool.yml`, which reads the shape named
+by the host's `otel_collector_config_file` from this repository's `main`
+(plan `kubernetes-node-observability`). Merging here is not deploying: run that
+repository's drift report and apply.
+
 ## Pointing Claude Code at the collector
 
 Set these environment variables before running `claude`. Full reference: <https://code.claude.com/docs/en/monitoring-usage#quick-start>.
