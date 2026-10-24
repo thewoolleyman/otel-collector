@@ -50,6 +50,7 @@ rules:
       - nodes/spec
       - nodes/stats
       - nodes/proxy
+      - persistentvolumeclaims
       - pods
       - pods/status
       - replicationcontrollers
@@ -69,6 +70,15 @@ rules:
   - apiGroups: [autoscaling]
     resources: [horizontalpodautoscalers]
     verbs: [get, list, watch]
+  # livespec-dev-tooling v094 'Runner-pool workload and control-plane telemetry'
+  # (items livespec-dev-tooling-ec2rkp and -vdleg7): Kueue ClusterQueue usage, read-only.
+  - apiGroups: [kueue.x-k8s.io]
+    resources: [clusterqueues]
+    verbs: [get, list, watch]
+  # API server readiness by named check and its /metrics (datastore size and
+  # request latency). Non-resource URLs; get only, never a write verb.
+  - nonResourceURLs: [/readyz, /readyz/*, /metrics]
+    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
