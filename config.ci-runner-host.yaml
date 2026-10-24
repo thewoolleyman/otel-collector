@@ -118,15 +118,63 @@ receivers:
     node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
     allocatable_types_to_report: [cpu, memory, ephemeral-storage, pods]
 
-  # Per-node / per-pod / per-container resource usage from the kubelet's
-  # stats summary, proxied through the API server (auth_type kubeConfig
-  # means `endpoint` is the NODE NAME, not a host:port). Single-node cluster,
-  # so one receiver covers it; a second node would add a second instance.
-  kubeletstats:
+  # Per-node / per-pod / per-container resource usage from EVERY node's
+  # kubelet stats summary, proxied through the API server (auth_type
+  # kubeConfig means a kubeletstats `endpoint` is the NODE NAME, not a
+  # host:port). Until ci-runner-host.4 this was ONE kubeletstats receiver
+  # pointed at OTEL_K8S_NODE_NAME, written for a single-node cluster; the
+  # cluster grew to three nodes and gmktec's and hp's kubelets went unread
+  # (livespec-dev-tooling plan kubernetes-node-observability, a2aiza).
+  #
+  # Now the k8s_observer extension watches the API server's Node objects and
+  # receiver_creator starts one kubeletstats per node it sees, so a node that
+  # joins is scraped with no edit here. receiver_creator also stamps
+  # k8s.node.name (and k8s.node.uid) on the RESOURCE of everything that
+  # instance emits — pod and container rows included — which is what
+  # attributes a pod's usage to the node it runs on. The scoped ClusterRole in
+  # k8s/otel-collector-rbac.yaml already grants nodes list/watch, nodes/proxy
+  # and nodes/stats.
+  #
+  # The *_request_utilization / *_limit_utilization metrics are off by default
+  # upstream; they are the per-pod "usage against what it asked for" that a
+  # requests-vs-allocatable reading needs beside k8s_cluster's request and
+  # limit gauges.
+  receiver_creator/kubelets:
+    watch_observers: [k8s_observer]
+    receivers:
+      kubeletstats:
+        rule: type == "k8s.node"
+        config:
+          auth_type: kubeConfig
+          endpoint: "`name`"
+          collection_interval: 30s
+          metric_groups: [node, pod, container]
+          metrics:
+            k8s.pod.cpu_request_utilization:
+              enabled: true
+            k8s.pod.cpu_limit_utilization:
+              enabled: true
+            k8s.pod.memory_request_utilization:
+              enabled: true
+            k8s.pod.memory_limit_utilization:
+              enabled: true
+            k8s.container.cpu_request_utilization:
+              enabled: true
+            k8s.container.cpu_limit_utilization:
+              enabled: true
+            k8s.container.memory_request_utilization:
+              enabled: true
+            k8s.container.memory_limit_utilization:
+              enabled: true
+
+extensions:
+  # Watches Node objects only (pods are not needed: kubeletstats reads a
+  # node's pods from that node's kubelet). Same scoped kubeconfig as the
+  # receivers.
+  k8s_observer:
     auth_type: kubeConfig
-    endpoint: ${env:OTEL_K8S_NODE_NAME}
-    collection_interval: 30s
-    metric_groups: [node, pod, container]
+    observe_nodes: true
+    observe_pods: false
 
 processors:
   batch:
@@ -144,27 +192,67 @@ processors:
       hostname_sources: [os]
     override: false
 
+  # Workload attribution for k3s rows: the deployment / statefulset /
+  # daemonset / job that owns a pod, matched by the pod uid kubeletstats and
+  # k8s_cluster both put on the resource. Node and namespace already arrive
+  # on the rows (receiver_creator stamps the node; both receivers carry the
+  # namespace); this adds the OWNER, so "what is loading gmktec" reads as a
+  # workload name rather than a pod hash. Same scoped kubeconfig; the
+  # ClusterRole grants pods, namespaces, nodes and replicasets.
+  k8sattributes:
+    auth_type: kubeConfig
+    passthrough: false
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+    extract:
+      metadata:
+        - k8s.node.name
+        - k8s.namespace.name
+        - k8s.pod.name
+        - k8s.deployment.name
+        - k8s.statefulset.name
+        - k8s.daemonset.name
+        - k8s.job.name
+
+  # host.name on a k3s row names the node the row is ABOUT. resourcedetection
+  # above stamps THIS collector's host on every row that lacks one, which made
+  # a pod on gmktec read as poweredge's; so where a row carries k8s.node.name,
+  # host.name follows it, and the collector's own name moves to
+  # collector.host.name. Rows with no node (cluster-scoped k8s_cluster
+  # metrics: deployments, quotas) keep the collector's host.name, which is
+  # what the existing host.name = poweredge-xubuntu queries read. IsString is
+  # the presence check (see CLAUDE.md, OTTL gotcha 1).
+  transform/k3s_host:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.host.name"], attributes["host.name"]) where IsString(attributes["host.name"])
+          - set(attributes["host.name"], attributes["k8s.node.name"]) where IsString(attributes["k8s.node.name"])
+
   # Marker processor, identical in purpose to config.yaml's: filter on
   # collector.otel-collector = "washere" to see only data that passed through
   # a collector in this repo. Version is per-config-file; this file starts its
-  # own series at ci-runner-host.1 (now .2).
+  # own series at ci-runner-host.1 (now .4).
   transform/mark:
     error_mode: ignore
     trace_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.3")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.4")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.3")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.4")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.3")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.4")
 
 exporters:
   # ONE exporter: everything goes to the livespec env. Traces/logs auto-route
@@ -185,6 +273,7 @@ exporters:
       x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
 
 service:
+  extensions: [k8s_observer]
   pipelines:
     traces:
       receivers: [otlp, otlp/pods]
@@ -203,6 +292,6 @@ service:
       processors: [resourcedetection/system, transform/mark, batch]
       exporters: [otlp/honeycomb_livespec]
     metrics/k3s:
-      receivers: [k8s_cluster, kubeletstats]
-      processors: [resourcedetection/system, transform/mark, batch]
+      receivers: [k8s_cluster, receiver_creator/kubelets]
+      processors: [k8sattributes, resourcedetection/system, transform/k3s_host, transform/mark, batch]
       exporters: [otlp/honeycomb_livespec]

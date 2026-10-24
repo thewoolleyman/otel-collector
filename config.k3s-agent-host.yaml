@@ -1,0 +1,122 @@
+# config.k3s-agent-host.yaml — the collector for a k3s AGENT node that is not
+# the CI-runner host (today: gmktec-xubuntu). Host resource metrics ONLY, into
+# the `livespec` Honeycomb environment, beside the cluster's kubelet and
+# k8s_cluster rows.
+#
+# This is the FOURTH deployment shape of this repo, beside config.yaml (the
+# vps factory/dev host, agent-activity env), config.ci-runner-host.yaml (the
+# k3s server + CI runner host, livespec env, which also scrapes EVERY node's
+# kubelet through the API server) and config.hp-factory.yaml (the hp factory
+# host). It exists because a kubelet's stats summary describes what the
+# kubelet sees and nothing else: load average, paging, per-device disk I/O and
+# per-mount free space are only readable ON the host, so every cluster node
+# needs a host collector of its own (livespec-dev-tooling plan
+# kubernetes-node-observability, b7wwgy). Until it, gmktec had none at all.
+#
+# NO KUBERNETES RECEIVERS and NO CLUSTER CREDENTIAL: the CI-runner host's
+# collector already reads this node's kubelet through the API-server proxy, so
+# a second copy would double every k8s row.
+#
+# NO OTLP RECEIVER: nothing on this host pushes telemetry into this collector.
+# gmktec's `otel-receiver.service` is the Fabro sandbox span receiver
+# (livespec-orchestrator-beads-fabro), a different process this shape does not
+# duplicate.
+#
+# Installed and converged by livespec-dev-tooling's `otel_collector` role from
+# ansible/ci-pool.yml (the host's `otel_collector_config_file`). Env:
+# /etc/otel-collector/.env carries HONEYCOMB_INGEST_KEY_LIVESPEC (+ optional
+# HONEYCOMB_API_ENDPOINT) — never committed, never echoed.
+#
+# Marker: bump collector.otel-collector.version in transform/mark on every
+# change to this file (own series, k3s-agent-host.N).
+
+receivers:
+  # Host resource metrics — the same scraper set and exclusions as
+  # config.ci-runner-host.yaml, plus /var/lib/containerd (k3s's containerd and
+  # Docker's both live under /var/lib on an agent).
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      load:
+      memory:
+        metrics:
+          system.linux.memory.available:
+            enabled: true
+      paging:
+      disk:
+      network:
+      filesystem:
+        exclude_mount_points:
+          mount_points:
+            - /proc/*
+            - /sys/*
+            - /run/*
+            - /dev/*
+            - /var/lib/docker/*
+            - /var/lib/rancher/*
+            - /var/lib/kubelet/*
+            - /var/lib/containerd/*
+            - /snap/*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - pstore
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tmpfs
+            - tracefs
+          match_type: strict
+
+processors:
+  batch:
+    timeout: 5s
+
+  # Stamp host.name: every cluster node shares the livespec env's one metrics
+  # dataset, so rows are told apart by host.name.
+  resourcedetection/system:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+    override: false
+
+  transform/mark:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.1")
+
+exporters:
+  # The livespec env is Metrics 2.0: every OTLP metric lands in its single
+  # `metrics` dataset, so no dataset header (it would be ignored).
+  otlp/honeycomb_livespec:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
+
+service:
+  pipelines:
+    metrics/host:
+      receivers: [hostmetrics]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
