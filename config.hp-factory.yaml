@@ -53,6 +53,11 @@ receivers:
           system.linux.memory.available:
             enabled: true
       paging:
+      # system.network.io / errors / dropped: the node-level network traffic that
+      # SPECIFICATION 'Runner-pool node telemetry' (livespec-dev-tooling v090) reads
+      # from hostmetrics by host.name, because the kubelet summary carries no
+      # node-level network series (livespec-dev-tooling-b7wwgy).
+      network:
       disk:
       filesystem:
         # /var/lib/docker/* and /var/lib/containerd/* are BIND MOUNTS of
@@ -139,7 +144,7 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "hp-factory-host.2")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-host.3")
 
 exporters:
   # hp is ALSO a k3s cluster node (a factory-only agent), so its host metrics
