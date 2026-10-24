@@ -58,6 +58,13 @@ The `collector.otel-collector.version` attribute lives in `transform/mark` for a
 
 Jessitron has this in her global instructions. Every commit message in this repo should end with a `- claude` line so she knows you wrote it. Look at `git log` for the style.
 
+### Open PRs with `-R thewoolleyman/otel-collector`
+
+This repository is a GitHub fork of `jessitron/claude-collector`, so a bare
+`gh pr create` opens the PR on that UPSTREAM repository, not this one. That
+happened on 2026-10-24 (jessitron/claude-collector#3, closed at once). Always
+pass `-R thewoolleyman/otel-collector --base main`.
+
 ### Don't write to memory
 
 Jessitron uses multiple computers. Notes live in `notes/` so they sync via git. Use the notes dir rather than the memory system.
