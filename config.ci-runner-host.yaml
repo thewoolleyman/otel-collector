@@ -219,6 +219,21 @@ processors:
   batch:
     timeout: 5s
 
+  # k8s.container.status.reason and .state are ENUM metrics: one datapoint per
+  # possible value, 1 for the container's actual reason or state and 0 for
+  # every other. Each datapoint's attribute has the SAME NAME as the metric, so
+  # in Honeycomb the attribute takes the column and the 0/1 value is lost. A
+  # running factory sandbox then read OOMKilled, ErrImagePull and
+  # CrashLoopBackOff all at once (measured 2026-10-27 on ci-runner-host.5).
+  # Dropping the zero datapoints leaves exactly one row per container: the
+  # reason and the state it actually has.
+  filter/k8s_enum_inactive:
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - 'metric.name == "k8s.container.status.reason" and value_int == 0'
+        - 'metric.name == "k8s.container.status.state" and value_int == 0'
+
   # Stamp host.name (and os.type) on everything. config.yaml omits this because
   # its dataset is single-host; here every CI-runner host shares the env's one
   # metrics dataset, so the dead-man trigger is FILTERED to host.name = <this
@@ -325,17 +340,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.5")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.6")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.5")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.6")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.5")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.6")
 
 exporters:
   # ONE exporter: everything goes to the livespec env. Traces/logs auto-route
@@ -392,7 +407,7 @@ service:
       exporters: [otlp/honeycomb_livespec]
     metrics/k3s:
       receivers: [k8s_cluster, receiver_creator/kubelets]
-      processors: [k8sattributes, resourcedetection/system, transform/k3s_host, transform/mark, batch]
+      processors: [filter/k8s_enum_inactive, k8sattributes, resourcedetection/system, transform/k3s_host, transform/mark, batch]
       exporters: [otlp/honeycomb_livespec]
     # Warning events -> the k8s-events dataset (ec2rkp).
     logs/k8s_events:
