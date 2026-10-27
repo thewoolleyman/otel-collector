@@ -294,6 +294,11 @@ processors:
   # k8s.pod.name. k8s.node.name is the reporting host when the event names one
   # (kubelet events do; scheduler events do not). IsMap / IsString / IsInt are
   # the presence checks (CLAUDE.md, OTTL gotcha 1).
+  # k8s.event.count falls back in order: the core `count` when positive, then
+  # `series.count`, then 1. Events written through the events.k8s.io API (the
+  # scheduler's FailedScheduling, Kueue's Pending) leave the core count unset:
+  # a repeated one carries series.count, and a singleton carries neither,
+  # because it happened once (measured 2026-10-27, ec2rkp replay).
   transform/k8s_events:
     error_mode: ignore
     log_statements:
@@ -310,7 +315,9 @@ processors:
           - set(attributes["k8s.event.type"], body["object"]["type"]) where IsString(body["object"]["type"])
           - set(attributes["k8s.event.reason"], body["object"]["reason"]) where IsString(body["object"]["reason"])
           - set(attributes["k8s.event.message"], body["object"]["message"]) where IsString(body["object"]["message"])
-          - set(attributes["k8s.event.count"], body["object"]["count"]) where IsInt(body["object"]["count"])
+          - set(attributes["k8s.event.count"], body["object"]["count"]) where IsInt(body["object"]["count"]) and body["object"]["count"] > 0
+          - set(attributes["k8s.event.count"], body["object"]["series"]["count"]) where not IsInt(attributes["k8s.event.count"]) and IsMap(body["object"]["series"]) and IsInt(body["object"]["series"]["count"])
+          - set(attributes["k8s.event.count"], 1) where not IsInt(attributes["k8s.event.count"])
           - set(attributes["k8s.event.object.kind"], body["object"]["involvedObject"]["kind"]) where IsString(body["object"]["involvedObject"]["kind"])
           - set(attributes["k8s.event.object.name"], body["object"]["involvedObject"]["name"]) where IsString(body["object"]["involvedObject"]["name"])
           - set(attributes["k8s.pod.name"], body["object"]["involvedObject"]["name"]) where body["object"]["involvedObject"]["kind"] == "Pod" and IsString(body["object"]["involvedObject"]["name"])
@@ -333,24 +340,24 @@ processors:
   # Marker processor, identical in purpose to config.yaml's: filter on
   # collector.otel-collector = "washere" to see only data that passed through
   # a collector in this repo. Version is per-config-file; this file starts its
-  # own series at ci-runner-host.1 (now .5).
+  # own series at ci-runner-host.1 (now .8).
   transform/mark:
     error_mode: ignore
     trace_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.7")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.8")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.7")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.8")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.7")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.8")
 
 exporters:
   # ONE exporter: everything goes to the livespec env. Traces/logs auto-route
