@@ -340,17 +340,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.6")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.7")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.6")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.7")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "ci-runner-host.6")
+          - set(attributes["collector.otel-collector.version"], "ci-runner-host.7")
 
 exporters:
   # ONE exporter: everything goes to the livespec env. Traces/logs auto-route
@@ -375,9 +375,14 @@ connectors:
   # phase, per namespace, in the metrics dataset (ec2rkp). A claim reads 1
   # under its current phase; summing by namespace + phase gives the
   # per-namespace phase counts.
+  #
+  # The METRIC is k8s.persistentvolumeclaim.claims, never .phase. A metric
+  # named like one of its own attributes collides with it in Honeycomb: the
+  # count overwrote the phase string, and every claim read phase "0"
+  # (measured 2026-10-27 on ci-runner-host.5 and .6).
   count/pvc:
     logs:
-      k8s.persistentvolumeclaim.phase:
+      k8s.persistentvolumeclaim.claims:
         description: PersistentVolumeClaims observed in a phase at the last pull (1 per claim).
         conditions:
           - 'IsString(attributes["k8s.persistentvolumeclaim.phase"])'
