@@ -121,17 +121,17 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.12")
+          - set(attributes["collector.otel-collector.version"], "0.13")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.12")
+          - set(attributes["collector.otel-collector.version"], "0.13")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.12")
+          - set(attributes["collector.otel-collector.version"], "0.13")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -302,3 +302,17 @@ service:
       receivers: [hostmetrics, docker_stats]
       processors: [resourcedetection/system, transform/mark, batch]
       exporters: [otlp/honeycomb_hostmetrics]
+    # The dev host's host metrics ALSO go to the `livespec` env's metrics
+    # dataset, beside every other execution target's, because the radar
+    # admission function reads its inputs there (livespec-dev-tooling
+    # SPECIFICATION §"Execution-target pressure telemetry", v114; work item
+    # livespec-dev-tooling-z6yf2a). A SECOND pipeline, not a move: the
+    # agent-activity triggers on livespec-host-metrics keep reading this
+    # host's rows unchanged. Host metrics only — docker_stats stays
+    # agent-activity-only. Same shape as config.hp-factory.yaml's
+    # metrics/host_livespec (b7wwgy); reuses otlp/honeycomb_livespec and its
+    # HONEYCOMB_INGEST_KEY_LIVESPEC, already in this host's .env for bd-guard.
+    metrics/host_livespec:
+      receivers: [hostmetrics]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
