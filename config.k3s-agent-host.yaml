@@ -17,7 +17,8 @@
 # collector already reads this node's kubelet through the API-server proxy, so
 # a second copy would double every k8s row.
 #
-# NO OTLP RECEIVER: nothing on this host pushes telemetry into this collector.
+# ONE OTLP RECEIVER, `otlp/pods`, for the runner pool's job pods only (see
+# receivers below). Nothing else on this host pushes telemetry into this collector.
 # gmktec's `otel-receiver.service` is the Fabro sandbox span receiver
 # (livespec-orchestrator-beads-fabro), a different process this shape does not
 # duplicate.
@@ -31,6 +32,22 @@
 # change to this file (own series, k3s-agent-host.N).
 
 receivers:
+  # Pod-reachable, KEYLESS OTLP/HTTP receiver for the runner pool's job pods,
+  # the same listener config.ci-runner-host.yaml carries on poweredge
+  # (livespec-dev-tooling-vnxp4l, plan ci-cache-optimization). The pool's hook
+  # pod template derives its span endpoint from the pod's own default gateway,
+  # which is this node's cni0 bridge, so without this receiver every cache and
+  # build span a job on this node posts goes nowhere. Bound to the cni0 bridge
+  # address ONLY (10.42.1.1, reachable from this node's pod CIDR 10.42.1.0/24 and
+  # from this host, from nothing on the LAN or Tailscale): the bind IS the
+  # access control for a keyless receiver. The bridge exists only once k3s has
+  # created its first pod, so an early start fails to bind and the unit's
+  # Restart=on-failure converges it.
+  otlp/pods:
+    protocols:
+      http:
+        endpoint: 10.42.1.1:4319
+
   # Host resource metrics — the same scraper set and exclusions as
   # config.ci-runner-host.yaml, plus /var/lib/containerd (k3s's containerd and
   # Docker's both live under /var/lib on an agent).
@@ -100,11 +117,16 @@ processors:
 
   transform/mark:
     error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.2")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.1")
+          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.2")
 
 exporters:
   # The livespec env is Metrics 2.0: every OTLP metric lands in its single
@@ -116,6 +138,10 @@ exporters:
 
 service:
   pipelines:
+    traces:
+      receivers: [otlp/pods]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
     metrics/host:
       receivers: [hostmetrics]
       processors: [resourcedetection/system, transform/mark, batch]

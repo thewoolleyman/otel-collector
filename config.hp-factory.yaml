@@ -21,7 +21,8 @@
 # internal-only credential, not customer-facing, on a machine already fully
 # controlled by this fleet.
 #
-# NO OTLP RECEIVER: nothing on hp needs to PUSH telemetry into this collector
+# ONE OTLP RECEIVER, `otlp/pods`, for the runner pool's job pods only (see
+# receivers below). Otherwise nothing on hp needs to PUSH telemetry into this collector
 # (no interactive Claude Code sessions, no shell OTLP/HTTP emitters like
 # bd-guard's — hp's `bd` usage, if any, is a separate question outside this
 # file's scope). Adding one is a future extension, not a default.
@@ -37,6 +38,22 @@
 # config.ci-runner-host.yaml's — same convention as those two).
 
 receivers:
+  # Pod-reachable, KEYLESS OTLP/HTTP receiver for the runner pool's job pods,
+  # the same listener config.ci-runner-host.yaml carries on poweredge
+  # (livespec-dev-tooling-vnxp4l, plan ci-cache-optimization). The pool's hook
+  # pod template derives its span endpoint from the pod's own default gateway,
+  # which is this node's cni0 bridge, so without this receiver every cache and
+  # build span a job on this node posts goes nowhere. Bound to the cni0 bridge
+  # address ONLY (10.42.2.1, reachable from this node's pod CIDR 10.42.2.0/24 and
+  # from this host, from nothing on the LAN or Tailscale): the bind IS the
+  # access control for a keyless receiver. The bridge exists only once k3s has
+  # created its first pod, so an early start fails to bind and the unit's
+  # Restart=on-failure converges it.
+  otlp/pods:
+    protocols:
+      http:
+        endpoint: 10.42.2.1:4319
+
   # Host resource metrics — same scraper set as config.yaml (Phase P-host of
   # fabro-ci-image-factoring), minus nothing: this host has the SAME
   # trigger-reading needs (CPU saturation, RAM-available hard floor) as vps.
@@ -140,11 +157,16 @@ processors:
   # "washere" to see only data that passed through a collector in this repo.
   transform/mark:
     error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-host.4")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "hp-factory-host.3")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-host.4")
 
 exporters:
   # hp is ALSO a k3s cluster node (a factory-only agent), so its host metrics
@@ -171,6 +193,10 @@ exporters:
 
 service:
   pipelines:
+    traces:
+      receivers: [otlp/pods]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
     metrics/host:
       receivers: [hostmetrics, docker_stats]
       processors: [resourcedetection/system, transform/mark, batch]
