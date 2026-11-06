@@ -223,6 +223,21 @@ by the host's `otel_collector_config_file` from this repository's `main`
 (plan `kubernetes-node-observability`). Merging here is not deploying: run that
 repository's drift report and apply.
 
+## Homelab worker (systemd in a container, host metrics + pod spans)
+
+`config.homelab-worker.yaml` is the collector for a homelab worker node — a
+k3s agent running as a systemd-in-container worker inside a VM on a personal
+machine (today `macbook-m4-max-homelab-worker`, livespec-dev-tooling plan
+`homelab-k8s-worker-nodes`). It is `config.k3s-agent-host.yaml`'s shape —
+`hostmetrics` plus the keyless `otlp/pods` receiver, into the `livespec`
+environment — with the two per-node values taken from the environment
+(`OTLP_PODS_ENDPOINT`, the worker's cni0 address and port 4319;
+`WORKER_NODE_NAME`, stamped as `host.name`), because every declared worker
+host runs one code path. livespec-dev-tooling's homelab worker start task
+fetches it at a pinned commit, verifies its sha256 and runs it inside the
+worker container. Validate a change with
+`OTLP_PODS_ENDPOINT=127.0.0.1:4319 WORKER_NODE_NAME=x HONEYCOMB_INGEST_KEY_LIVESPEC=dummy otelcol-contrib validate --config config.homelab-worker.yaml`.
+
 ## Pointing Claude Code at the collector
 
 Set these environment variables before running `claude`. Full reference: <https://code.claude.com/docs/en/monitoring-usage#quick-start>.
