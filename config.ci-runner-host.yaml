@@ -2,6 +2,8 @@
 # (today: poweredge-xubuntu, the k3s + Actions Runner Controller + Kueue node
 # that carries every livespec fleet repository's gating CI).
 #
+# Capture marker 2026-11-06 (livespec-dev-tooling-aqzi32): comment-only, no behavior change.
+#
 # This is the SECOND deployment shape of this repo, beside config.yaml (the
 # factory/VPS host, agent-activity env) and config.macos.yaml (laptops). It
 # exists because the CI-runner kit in livespec-dev-tooling
