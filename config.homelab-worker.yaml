@@ -1,0 +1,137 @@
+# config.homelab-worker.yaml — the collector for a HOMELAB WORKER node: a k3s
+# agent that runs as a systemd-in-container worker inside a VM on a personal
+# machine (today: macbook-m4-max-homelab-worker; livespec-dev-tooling plan
+# homelab-k8s-worker-nodes, livespec-dev-tooling-ko26ez.4, DoD assertion 18).
+#
+# The FIFTH deployment shape of this repo. It is config.k3s-agent-host.yaml's
+# shape — host resource metrics plus the keyless otlp/pods receiver for the
+# runner pool's job spans, into the `livespec` environment, NO Kubernetes
+# receiver and NO cluster credential — with the two per-node values that
+# shape writes down taken from the environment instead, because a worker is
+# provisioned by one code path for every declared host:
+#
+#   OTLP_PODS_ENDPOINT   the worker's cni0 bridge address and port 4319
+#   WORKER_NODE_NAME     the node name, stamped as host.name
+#
+# Installed by livespec-dev-tooling's homelab worker start task, which
+# fetches this file at a pinned commit and verifies its sha256; it runs as a
+# systemd unit inside the worker container. Env: HONEYCOMB_INGEST_KEY_LIVESPEC
+# (+ optional HONEYCOMB_API_ENDPOINT), delivered on stdin by the start task —
+# never committed, never echoed.
+#
+# Marker: bump collector.otel-collector.version in transform/mark on every
+# change to this file (own series, homelab-worker.N).
+receivers:
+  # Pod-reachable, KEYLESS OTLP/HTTP receiver for the runner pool's job pods,
+  # the same listener config.k3s-agent-host.yaml carries. Bound to the worker's
+  # cni0 bridge address ONLY — the bind IS the access control for a keyless
+  # receiver. That address is the worker node's own flannel /24 gateway, which
+  # the cluster assigns when the worker joins, so it is read from the
+  # environment (OTLP_PODS_ENDPOINT, written by the worker's converge from the
+  # live bridge) rather than written here.
+  otlp/pods:
+    protocols:
+      http:
+        endpoint: ${env:OTLP_PODS_ENDPOINT}
+
+  # Host resource metrics — the same scraper set and exclusions as
+  # config.ci-runner-host.yaml, plus /var/lib/containerd (k3s's containerd and
+  # Docker's both live under /var/lib on an agent).
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      load:
+      memory:
+        metrics:
+          system.linux.memory.available:
+            enabled: true
+      paging:
+      disk:
+      network:
+      filesystem:
+        exclude_mount_points:
+          mount_points:
+            - /proc/*
+            - /sys/*
+            - /run/*
+            - /dev/*
+            - /var/lib/docker/*
+            - /var/lib/rancher/*
+            - /var/lib/kubelet/*
+            - /var/lib/containerd/*
+            - /snap/*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - pstore
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tmpfs
+            - tracefs
+          match_type: strict
+
+processors:
+  batch:
+    timeout: 5s
+
+  # Stamp host.name with the worker's NODE name: every cluster node shares the
+  # livespec env's one metrics dataset, so rows are told apart by host.name.
+  # Set from the environment (WORKER_NODE_NAME) rather than detected, because
+  # the collector runs inside the worker container on the VM's host network,
+  # where the OS hostname is the VM's, not the node's.
+  resource/host:
+    attributes:
+      - key: host.name
+        value: ${env:WORKER_NODE_NAME}
+        action: upsert
+
+  transform/mark:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "homelab-worker.1")
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "homelab-worker.1")
+
+exporters:
+  # The livespec env is Metrics 2.0: every OTLP metric lands in its single
+  # `metrics` dataset, so no dataset header (it would be ignored).
+  otlp/honeycomb_livespec:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp/pods]
+      processors: [resource/host, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
+    metrics/host:
+      receivers: [hostmetrics]
+      processors: [resource/host, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
