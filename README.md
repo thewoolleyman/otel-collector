@@ -223,6 +223,28 @@ by the host's `otel_collector_config_file` from this repository's `main`
 (plan `kubernetes-node-observability`). Merging here is not deploying: run that
 repository's drift report and apply.
 
+## Dev host on the livespec key only (Linux, systemd, no container engine)
+
+`config.dev-host-livespec.yaml` is `config.yaml`'s dev-host shape for a dev
+host that holds only the `livespec` environment's ingest key and runs no
+container engine — today `hetzner-xubuntu`, the interactive-AI host the
+coordinator and dispatcher seats move to from `vps`. It keeps the same
+`hostmetrics` and `hostmetrics/tmpfs` receivers (verbatim, so `/tmp` and
+`/dev/shm` fill and `system.memory.limit` are present) and the same
+`livespec.host.role = dev-host` stamp, so the dev-host memory-floor and
+tmpfs-fill triggers can cover it with no copy. Those triggers are carried by
+livespec-dev-tooling's feat-dev-host-overload-triggers change (not yet on its
+master) and hetzner-xubuntu-info's telemetry item. It drops `docker_stats` and every agent-activity exporter: host metrics,
+the host's own `livespec.*` OTLP metrics, and the `bd-guard` and
+`livespec-delegated-gate` spans all go to the `livespec` environment. Other
+spans and metrics a local client posts are dropped. Known gap: Claude Code's
+agent-activity traces and metrics and all OTLP logs have no pipeline, so that
+telemetry stops for sessions on this host until hetzner-xubuntu-info's logs and
+agent-activity item restores it. It is converged by
+livespec-dev-tooling's `otel_collector` role, applied from
+`thewoolleyman/hetzner-xubuntu-info`. Validate a change with
+`HONEYCOMB_INGEST_KEY_LIVESPEC=dummy otelcol-contrib validate --config config.dev-host-livespec.yaml`.
+
 ## Homelab worker (systemd in a container, host metrics + pod spans)
 
 `config.homelab-worker.yaml` is the collector for a homelab worker node — a

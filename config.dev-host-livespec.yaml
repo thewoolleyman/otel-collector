@@ -1,0 +1,212 @@
+# config.dev-host-livespec.yaml — a DEV HOST that holds only the `livespec`
+# Honeycomb environment's ingest key (today: hetzner-xubuntu, the interactive-AI
+# host the coordinator and dispatcher seats move to from vps).
+#
+# It is config.yaml's dev-host shape with everything that needs another
+# credential or a container engine taken out:
+#   * NO docker_stats: this host runs no container engine, and a receiver that
+#     cannot reach its socket fails the whole collector's start.
+#   * NO agent-activity exporters: the host's sealed credential wrapper
+#     (/usr/local/bin/with-livespec-env.sh) carries HONEYCOMB_INGEST_KEY_LIVESPEC
+#     and no HONEYCOMB_API_KEY, so every pipeline exports to the livespec env.
+#
+# What it keeps, copied from config.yaml so the dev-host memory-floor and
+# tmpfs-fill triggers can cover every dev host with one definition each. Those
+# triggers are carried by livespec-dev-tooling's feat-dev-host-overload-triggers
+# change (not yet on its master) and hetzner-xubuntu-info's telemetry item:
+#   * the same `hostmetrics` scraper set, including the opt-in
+#     system.linux.memory.available and system.memory.limit the memory-floor
+#     trigger divides;
+#   * the same `hostmetrics/tmpfs` receiver, VERBATIM: exactly /tmp and
+#     /dev/shm, with include_virtual_filesystems (without it a named tmpfs is
+#     still dropped and the fill trigger has zero datapoints);
+#   * the same `livespec.host.role = dev-host` stamp in transform/mark, which is
+#     what the dev-host triggers select on (breaking down by host.name).
+#
+# The loopback OTLP receiver stays, so the livespec spans a seat emits on this
+# host keep landing where they do on vps: bd-guard and livespec-delegated-gate
+# spans go to the livespec env (traces/livespec). Any other span (Claude Code's
+# agent timeline) is dropped here, because this host holds no agent-activity
+# key. OTLP metrics named `livespec.*` (the host's own health emitters, which
+# post keyless to 127.0.0.1:4319) go to the livespec env's metrics dataset
+# beside the host metrics; any other OTLP metric is dropped.
+#
+# KNOWN GAP: Claude Code's agent-activity traces and metrics, and every OTLP log,
+# have no pipeline here, so the agent-activity telemetry vps ships today stops
+# for sessions on this host. Restoring it is hetzner-xubuntu-info's item "Ship
+# hetzner-xubuntu's logs and agent activity to Honeycomb over OTel".
+#
+# Installed and converged by livespec-dev-tooling's `otel_collector` role,
+# applied by hetzner-xubuntu-info (`otel_collector_config_file`). Env: the
+# role's environment file carries HONEYCOMB_INGEST_KEY_LIVESPEC, rendered on
+# the host from its own sealed wrapper; never committed, never echoed.
+# HONEYCOMB_API_ENDPOINT is optional (defaults to api.honeycomb.io:443).
+#
+# Marker: bump collector.otel-collector.version in transform/mark on every
+# change to this file (own series, dev-host-livespec.N).
+
+receivers:
+  # Loopback-only, as in config.yaml: gRPC 4317 and HTTP 4319 (curl callers,
+  # such as the bd-guard wrapper and the host's health emitters).
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4319
+
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      # system.cpu.utilization is opt-in (default emits only the cumulative
+      # system.cpu.time counter, which Honeycomb metrics datasets cannot
+      # RATE over) — the livespec-3lev.1 CPU-saturation trigger needs the
+      # per-interval utilization gauge (filter state=idle).
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      load:
+      # system.linux.memory.available is opt-in; the RAM-available hard-floor
+      # trigger reads it (kernel "available" ≠ free — free undercounts by
+      # reclaimable cache, which misread the 2026-07-18 incident).
+      memory:
+        metrics:
+          system.linux.memory.available:
+            enabled: true
+          # system.memory.limit (total RAM, opt-in) makes the memory-floor
+          # trigger a SHARE, available / limit, so one definition fits dev
+          # hosts of different sizes (vmi3006760 94 GiB, hetzner-xubuntu
+          # 125 GiB). Same scrape and timestamp as available, so both land on
+          # one row.
+          system.memory.limit:
+            enabled: true
+      paging:
+      disk:
+      filesystem:
+        # Keep to real disks: exclude pseudo-filesystems and the many docker
+        # overlay mounts, which would otherwise explode mount-point cardinality.
+        exclude_mount_points:
+          mount_points:
+            - /proc/*
+            - /sys/*
+            - /run/*
+            - /dev/*
+            - /var/lib/docker/*
+          match_type: regexp
+        exclude_fs_types:
+          fs_types:
+            - autofs
+            - bpf
+            - cgroup2
+            - configfs
+            - debugfs
+            - devpts
+            - devtmpfs
+            - fusectl
+            - hugetlbfs
+            - mqueue
+            - nsfs
+            - overlay
+            - proc
+            - pstore
+            - securityfs
+            - selinuxfs
+            - squashfs
+            - sysfs
+            - tmpfs
+            - tracefs
+          match_type: strict
+
+  # RAM-backed scratch: /tmp and /dev/shm are tmpfs on this host (each 50% of
+  # RAM), so every byte written there is memory. The filesystem scraper above
+  # skips tmpfs and every virtual filesystem, so neither mount was visible
+  # until 2026-11-13, when /tmp at 35-38G helped OOM-kill Dolt on vmi3006760
+  # (15:32:41Z) with nothing alerting. A SEPARATE receiver so the cardinality
+  # guard above stays as it is: exactly these two mounts,
+  # include_virtual_filesystems (without it a tmpfs is dropped even when named),
+  # and the opt-in system.filesystem.utilization share the fill trigger reads.
+  hostmetrics/tmpfs:
+    collection_interval: 30s
+    scrapers:
+      filesystem:
+        include_virtual_filesystems: true
+        include_fs_types:
+          fs_types: [tmpfs]
+          match_type: strict
+        include_mount_points:
+          mount_points: [/tmp, /dev/shm]
+          match_type: strict
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+
+processors:
+  batch:
+    timeout: 5s
+
+  # Stamp host.name: every dev host shares the livespec env's one metrics
+  # dataset, so rows are told apart by host.name. override: false keeps a
+  # host.name an OTLP emitter already set.
+  resourcedetection/system:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+    override: false
+
+  # The same marker and dev-host role stamp as config.yaml; the version is this
+  # file's own series.
+  transform/mark:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "dev-host-livespec.1")
+          - set(attributes["livespec.host.role"], "dev-host")
+    metric_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "dev-host-livespec.1")
+          - set(attributes["livespec.host.role"], "dev-host")
+
+  # The same livespec-span selection as config.yaml's filter/only_bd_guard: a
+  # span is DROPPED where its condition is true.
+  filter/only_bd_guard:
+    error_mode: ignore
+    traces:
+      span:
+        - 'resource.attributes["service.name"] != "bd-guard" and resource.attributes["service.name"] != "livespec-delegated-gate"'
+
+  # Only the host's own `livespec.*` OTLP metrics are kept; anything else a
+  # local client posts (Claude Code's usage metrics) is dropped rather than
+  # written into the shared livespec metrics dataset.
+  filter/only_livespec_metrics:
+    error_mode: ignore
+    metrics:
+      metric:
+        - 'not IsMatch(name, "^livespec[.]")'
+
+exporters:
+  # The livespec env is Metrics 2.0: every OTLP metric lands in its single
+  # `metrics` dataset, so no dataset header (it would be ignored).
+  otlp/honeycomb_livespec:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
+
+service:
+  pipelines:
+    metrics/host_livespec:
+      receivers: [hostmetrics, hostmetrics/tmpfs]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
+    metrics/otlp_livespec:
+      receivers: [otlp]
+      processors: [filter/only_livespec_metrics, resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]
+    traces/livespec:
+      receivers: [otlp]
+      processors: [transform/mark, filter/only_bd_guard, batch]
+      exporters: [otlp/honeycomb_livespec]
