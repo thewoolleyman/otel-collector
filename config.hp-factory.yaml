@@ -38,21 +38,11 @@
 # config.ci-runner-host.yaml's — same convention as those two).
 
 receivers:
-  # Pod-reachable, KEYLESS OTLP/HTTP receiver for the runner pool's job pods,
-  # the same listener config.ci-runner-host.yaml carries on poweredge
-  # (livespec-dev-tooling-vnxp4l, plan ci-cache-optimization). The pool's hook
-  # pod template derives its span endpoint from the pod's own default gateway,
-  # which is this node's cni0 bridge, so without this receiver every cache and
-  # build span a job on this node posts goes nowhere. Bound to the cni0 bridge
-  # address ONLY (10.42.2.1, reachable from this node's pod CIDR 10.42.2.0/24 and
-  # from this host, from nothing on the LAN or Tailscale): the bind IS the
-  # access control for a keyless receiver. The bridge exists only once k3s has
-  # created its first pod, so an early start fails to bind and the unit's
-  # Restart=on-failure converges it.
-  otlp/pods:
-    protocols:
-      http:
-        endpoint: 10.42.2.1:4319
+  # The keyless `otlp/pods` receiver is NOT here. It runs in its own process,
+  # otel-collector-pods.service, from config.hp-factory-pods.yaml (livespec-dev-tooling-rz23sl):
+  # its bind needs this node's cni0 bridge, which k3s creates only when the
+  # first pod lands, and a receiver that fails to start aborts its whole
+  # collector. Kept apart, a cordoned or pod-less node still sends host metrics.
 
   # Host resource metrics — same scraper set as config.yaml (Phase P-host of
   # fabro-ci-image-factoring), minus nothing: this host has the SAME
@@ -161,12 +151,12 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "hp-factory-host.4")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-host.5")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "hp-factory-host.4")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-host.5")
 
 exporters:
   # hp is ALSO a k3s cluster node (a factory-only agent), so its host metrics
@@ -193,10 +183,6 @@ exporters:
 
 service:
   pipelines:
-    traces:
-      receivers: [otlp/pods]
-      processors: [resourcedetection/system, transform/mark, batch]
-      exporters: [otlp/honeycomb_livespec]
     metrics/host:
       receivers: [hostmetrics, docker_stats]
       processors: [resourcedetection/system, transform/mark, batch]
