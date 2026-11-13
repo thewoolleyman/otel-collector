@@ -1,0 +1,74 @@
+# config.hp-factory-pods.yaml — the KEYLESS pod-span receiver for the hp factory host
+# (hp-xubuntu, cni0 10.42.2.1), run as its own
+# process (otel-collector-pods.service) beside the host collector
+# config.hp-factory.yaml (livespec-dev-tooling-rz23sl).
+#
+# WHY A SEPARATE PROCESS: the receiver binds this node's cni0 bridge address,
+# and k3s creates cni0 only when the first pod lands. A collector whose
+# receiver fails to start aborts the WHOLE process, so while this receiver
+# lived in the host collector a cordoned or pod-less node sent no host metrics
+# at all (gamingpc-xubuntu, 2026-11-12 22:15Z, NRestarts=26). Here a bind
+# failure restarts only this unit (Restart=on-failure), and the host collector
+# keeps exporting.
+#
+# The runner pool's hook pod template derives its span endpoint from the pod's
+# own default gateway, which is this node's cni0 bridge, port 4319. Bound to
+# that address ONLY: the bind IS the access control for a keyless receiver
+# (reachable from this node's pod CIDR and this host, nothing on the LAN or
+# Tailscale).
+#
+# Installed by livespec-dev-tooling's `otel_collector` role (the host's
+# `otel_collector_pod_config_file`), fetched at the same commit as the host
+# configuration. Env: HONEYCOMB_INGEST_KEY_LIVESPEC (+ optional
+# HONEYCOMB_API_ENDPOINT) — never committed, never echoed.
+#
+# Marker: bump collector.otel-collector.version in transform/mark on every
+# change to this file (own series, hp-factory-pods.N).
+
+receivers:
+  otlp/pods:
+    protocols:
+      http:
+        endpoint: 10.42.2.1:4319
+
+processors:
+  batch:
+    timeout: 5s
+
+  # Stamp host.name, as the host collector does, so a span is attributed to
+  # the node that received it.
+  resourcedetection/system:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+    override: false
+
+  transform/mark:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - set(attributes["collector.otel-collector"], "washere")
+          - set(attributes["collector.otel-collector.version"], "hp-factory-pods.1")
+
+exporters:
+  otlp/honeycomb_livespec:
+    endpoint: ${env:HONEYCOMB_API_ENDPOINT:-api.honeycomb.io:443}
+    headers:
+      x-honeycomb-team: ${env:HONEYCOMB_INGEST_KEY_LIVESPEC}
+
+service:
+  # NO internal-telemetry listener. The host collector on the same machine
+  # already binds the default 127.0.0.1:8888, and otelcol-contrib 0.147.0
+  # REFUSES to start when that bind fails ("failed to create meter provider:
+  # binding address localhost:8888 ... address already in use", measured
+  # 2026-11-13), so a second process left at the default would crash-loop
+  # forever.
+  telemetry:
+    metrics:
+      level: none
+  pipelines:
+    traces:
+      receivers: [otlp/pods]
+      processors: [resourcedetection/system, transform/mark, batch]
+      exporters: [otlp/honeycomb_livespec]

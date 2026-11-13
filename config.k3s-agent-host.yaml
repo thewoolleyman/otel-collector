@@ -17,8 +17,8 @@
 # collector already reads this node's kubelet through the API-server proxy, so
 # a second copy would double every k8s row.
 #
-# ONE OTLP RECEIVER, `otlp/pods`, for the runner pool's job pods only (see
-# receivers below). Nothing else on this host pushes telemetry into this collector.
+# NO OTLP RECEIVER: the runner pool's job-pod spans go to the separate
+# pod-span collector, config.k3s-agent-host-pods.yaml (livespec-dev-tooling-rz23sl).
 # gmktec's `otel-receiver.service` is the Fabro sandbox span receiver
 # (livespec-orchestrator-beads-fabro), a different process this shape does not
 # duplicate.
@@ -32,25 +32,11 @@
 # change to this file (own series, k3s-agent-host.N).
 
 receivers:
-  # Pod-reachable, KEYLESS OTLP/HTTP receiver for the runner pool's job pods,
-  # the same listener config.ci-runner-host.yaml carries on poweredge
-  # (livespec-dev-tooling-vnxp4l, plan ci-cache-optimization). The pool's hook
-  # pod template derives its span endpoint from the pod's own default gateway,
-  # which is this node's cni0 bridge, so without this receiver every cache and
-  # build span a job on this node posts goes nowhere. Bound to this node's cni0
-  # bridge address ONLY (reachable from this node's pod CIDR and from this host,
-  # from nothing on the LAN or Tailscale): the bind IS the access control for a
-  # keyless receiver. The address differs per node (gmktec 10.42.1.1, gamingpc
-  # 10.42.5.1), so it comes from OTLP_PODS_ENDPOINT, which livespec-dev-tooling's
-  # otel_collector role writes into the collector's environment file from the
-  # node's own /run/flannel/subnet.env FLANNEL_SUBNET gateway, port 4319
-  # (livespec-dev-tooling-rwbuf5). A hardcoded 10.42.1.1 crash-looped gamingpc.
-  # The bridge exists only once k3s has created its first pod, so an early
-  # start fails to bind and the unit's Restart=on-failure converges it.
-  otlp/pods:
-    protocols:
-      http:
-        endpoint: ${env:OTLP_PODS_ENDPOINT}
+  # The keyless `otlp/pods` receiver is NOT here. It runs in its own process,
+  # otel-collector-pods.service, from config.k3s-agent-host-pods.yaml (livespec-dev-tooling-rz23sl):
+  # its bind needs this node's cni0 bridge, which k3s creates only when the
+  # first pod lands, and a receiver that fails to start aborts its whole
+  # collector. Kept apart, a cordoned or pod-less node still sends host metrics.
 
   # Host resource metrics — the same scraper set and exclusions as
   # config.ci-runner-host.yaml, plus /var/lib/containerd (k3s's containerd and
@@ -125,12 +111,12 @@ processors:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.2")
+          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.3")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.2")
+          - set(attributes["collector.otel-collector.version"], "k3s-agent-host.3")
 
 exporters:
   # The livespec env is Metrics 2.0: every OTLP metric lands in its single
@@ -142,10 +128,6 @@ exporters:
 
 service:
   pipelines:
-    traces:
-      receivers: [otlp/pods]
-      processors: [resourcedetection/system, transform/mark, batch]
-      exporters: [otlp/honeycomb_livespec]
     metrics/host:
       receivers: [hostmetrics]
       processors: [resourcedetection/system, transform/mark, batch]
