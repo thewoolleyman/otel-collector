@@ -47,6 +47,13 @@ receivers:
         metrics:
           system.linux.memory.available:
             enabled: true
+          # system.memory.limit (total RAM, opt-in) makes the memory-floor
+          # trigger a SHARE, available / limit, so one definition fits dev
+          # hosts of different sizes (vmi3006760 94 GiB, hetzner-xubuntu
+          # 125 GiB). Same scrape and timestamp as available, so both land on
+          # one row.
+          system.memory.limit:
+            enabled: true
       paging:
       disk:
       filesystem:
@@ -84,6 +91,29 @@ receivers:
             - tracefs
           match_type: strict
 
+  # RAM-backed scratch: /tmp and /dev/shm are tmpfs on this host (each 50% of
+  # RAM), so every byte written there is memory. The filesystem scraper above
+  # skips tmpfs and every virtual filesystem, so neither mount was visible
+  # until 2026-11-13, when /tmp at 35-38G helped OOM-kill Dolt on vmi3006760
+  # (15:32:41Z) with nothing alerting. A SEPARATE receiver so the cardinality
+  # guard above stays as it is: exactly these two mounts,
+  # include_virtual_filesystems (without it a tmpfs is dropped even when named),
+  # and the opt-in system.filesystem.utilization share the fill trigger reads.
+  hostmetrics/tmpfs:
+    collection_interval: 30s
+    scrapers:
+      filesystem:
+        include_virtual_filesystems: true
+        include_fs_types:
+          fs_types: [tmpfs]
+          match_type: strict
+        include_mount_points:
+          mount_points: [/tmp, /dev/shm]
+          match_type: strict
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+
   # Per-container resource attribution (Fabro sandbox vs CI runner vs Dolt).
   # Reaches the Docker API over the socket; the `ubuntu` service user is in the
   # `docker` group, so no extra grant is needed. Read-only stats.
@@ -115,23 +145,30 @@ processors:
   # collector.otel-collector="washere" in Honeycomb to see only data that
   # went through us. Bump the version whenever this config changes
   # meaningfully so we can tell which generation produced which data.
+  # livespec.host.role = dev-host marks every host that runs THIS shape, so a
+  # trigger can select "the dev hosts" by role and break down by host.name: a
+  # new dev host joins those triggers by running this config, with no copy of
+  # any trigger (livespec-dev-tooling ci-runner/observability/triggers/).
   transform/mark:
     error_mode: ignore
     trace_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.13")
+          - set(attributes["collector.otel-collector.version"], "0.14")
+          - set(attributes["livespec.host.role"], "dev-host")
     metric_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.13")
+          - set(attributes["collector.otel-collector.version"], "0.14")
+          - set(attributes["livespec.host.role"], "dev-host")
     log_statements:
       - context: resource
         statements:
           - set(attributes["collector.otel-collector"], "washere")
-          - set(attributes["collector.otel-collector.version"], "0.13")
+          - set(attributes["collector.otel-collector.version"], "0.14")
+          - set(attributes["livespec.host.role"], "dev-host")
 
   transform/agent_timeline:
     error_mode: ignore
@@ -313,6 +350,6 @@ service:
     # metrics/host_livespec (b7wwgy); reuses otlp/honeycomb_livespec and its
     # HONEYCOMB_INGEST_KEY_LIVESPEC, already in this host's .env for bd-guard.
     metrics/host_livespec:
-      receivers: [hostmetrics]
+      receivers: [hostmetrics, hostmetrics/tmpfs]
       processors: [resourcedetection/system, transform/mark, batch]
       exporters: [otlp/honeycomb_livespec]
