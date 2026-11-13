@@ -184,7 +184,7 @@ rows are.
 # 0. Render the secret env file on hp WITHOUT the value touching a terminal.
 #    Same key vps's collector already uses -- copy it from there, not from a
 #    fresh 1Password read, so there is exactly one place this key is fetched.
-sudo grep '^HONEYCOMB_API_KEY=\|^HONEYCOMB_API_ENDPOINT=' /data/projects/otel-collector/.env \
+sudo grep '^HONEYCOMB_API_KEY=\|^HONEYCOMB_API_ENDPOINT=' "$HOME/workspace/otel-collector/.env" \
   | ssh hp-xubuntu 'sudo install -d -m 0755 /etc/otel-collector && sudo install -o root -g root -m 0600 /dev/stdin /etc/otel-collector/.env'
 
 # 1. Copy this repo (or just config.hp-factory.yaml, systemd/, scripts/) to
