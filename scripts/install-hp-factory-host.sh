@@ -86,7 +86,7 @@ the vps factory host's collector already uses -- render it from that same
 1Password Environment WITHOUT the value passing through a terminal, from a
 host that already has it (vps):
 
-  sudo grep '^HONEYCOMB_API_KEY=\\|^HONEYCOMB_API_ENDPOINT=' /data/projects/otel-collector/.env \\
+  sudo grep '^HONEYCOMB_API_KEY=\\|^HONEYCOMB_API_ENDPOINT=' "\$HOME/workspace/otel-collector/.env" \\
     | ssh hp-xubuntu 'sudo install -o root -g root -m 0600 /dev/stdin $etc_dir/.env'
 
 then re-run this installer.
