@@ -10,8 +10,10 @@
 #     (/usr/local/bin/with-livespec-env.sh) carries HONEYCOMB_INGEST_KEY_LIVESPEC
 #     and no HONEYCOMB_API_KEY, so every pipeline exports to the livespec env.
 #
-# What it keeps, copied from config.yaml so one set of triggers covers every
-# dev host (livespec-dev-tooling ci-runner/observability/triggers/):
+# What it keeps, copied from config.yaml so the dev-host memory-floor and
+# tmpfs-fill triggers can cover every dev host with one definition each. Those
+# triggers are carried by livespec-dev-tooling's feat-dev-host-overload-triggers
+# change (not yet on its master) and hetzner-xubuntu-info's telemetry item:
 #   * the same `hostmetrics` scraper set, including the opt-in
 #     system.linux.memory.available and system.memory.limit the memory-floor
 #     trigger divides;
@@ -28,6 +30,11 @@
 # key. OTLP metrics named `livespec.*` (the host's own health emitters, which
 # post keyless to 127.0.0.1:4319) go to the livespec env's metrics dataset
 # beside the host metrics; any other OTLP metric is dropped.
+#
+# KNOWN GAP: Claude Code's agent-activity traces and metrics, and every OTLP log,
+# have no pipeline here, so the agent-activity telemetry vps ships today stops
+# for sessions on this host. Restoring it is hetzner-xubuntu-info's item "Ship
+# hetzner-xubuntu's logs and agent activity to Honeycomb over OTel".
 #
 # Installed and converged by livespec-dev-tooling's `otel_collector` role,
 # applied by hetzner-xubuntu-info (`otel_collector_config_file`). Env: the
