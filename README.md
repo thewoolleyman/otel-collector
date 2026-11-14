@@ -1,5 +1,7 @@
 # otel-collector
 
+Built with [livespec](https://livespec-ai.org/)
+
 This host's OpenTelemetry Collector — it receives telemetry, shapes it, and forwards it to [Honeycomb](https://www.honeycomb.io). Today its main job is shaping [Claude Code](https://code.claude.com/docs/en/monitoring-usage) telemetry so it appears in Honeycomb's **Agentic Timeline**; the same collector also carries the host's metrics/logs pipelines and can grow additional shapers (e.g. for other agent runtimes). It runs on **Linux or macOS**.
 
 > Formerly named `claude-collector`. The name was generalized because this is functionally the host's shared OTel collector, of which the Claude-Code Agentic-Timeline shaping is just one processor.
